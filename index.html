@@ -1244,119 +1244,93 @@ render();
   setTimeout(run,1450);
 })();
 
-/* ══ PWA — FULL FIX ══ */
+/* ══ PWA INSTALL ══ */
 (()=>{
-  // ── Detect if already installed as PWA ──
+  // 1. Register Service Worker
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js', { scope: '/GastoCerto/' })
+      .then(r => console.log('[SW] registered:', r.scope))
+      .catch(e => console.warn('[SW] error:', e));
+  }
+
+  // 2. Detect standalone (already installed)
   const isStandalone = () =>
     window.matchMedia('(display-mode: standalone)').matches ||
-    window.matchMedia('(display-mode: fullscreen)').matches ||
-    window.navigator.standalone === true ||
-    document.referrer.includes('android-app://');
+    navigator.standalone === true;
 
-  // ── If running as installed PWA, hide browser chrome ──
   if (isStandalone()) {
-    document.body.classList.add('pwa-installed');
-    // Hide install banner permanently when already installed
-    const b = document.getElementById('ibanner');
-    if (b) b.style.display = 'none';
-    const ib = document.getElementById('ios-banner');
-    if (ib) ib.style.display = 'none';
-    return; // No need to setup install logic
-  }
-
-  // ── Service Worker Registration ──
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js', { scope: '/GastoCerto/' })
-        .then(reg => {
-          console.log('[GastoCerto] SW scope:', reg.scope);
-          reg.update();
-        })
-        .catch(e => console.warn('[GastoCerto] SW error:', e));
+    // Hide banners when running as installed app
+    ['ibanner','ios-banner'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
     });
+    return;
   }
 
-  const banner  = document.getElementById('ibanner');
-  const btnInst = document.getElementById('btn-inst');
-  const btnDis  = document.getElementById('btn-dis');
+  // 3. Variables
+  let deferredPrompt = null;
+  const banner    = document.getElementById('ibanner');
+  const btnInst   = document.getElementById('btn-inst');
+  const btnDis    = document.getElementById('btn-dis');
   const iosBanner = document.getElementById('ios-banner');
   const iosClose  = document.getElementById('ios-close');
+  const isIOS     = () => /iphone|ipad|ipod/i.test(navigator.userAgent);
 
-  const isIOS = () => /iphone|ipad|ipod/i.test(navigator.userAgent) && !window.MSStream;
-  let deferredPrompt = null;
-  let bannerShown = false;
-
-  function showBanner() {
-    if (bannerShown || isStandalone()) return;
-    bannerShown = true;
-    if (banner) banner.classList.add('show');
-  }
-
-  // ── Android Chrome: intercept beforeinstallprompt ──
+  // 4. Capture Chrome's native install prompt
+  //    Chrome fires this ONLY when ALL PWA criteria are met
+  //    We MUST call e.preventDefault() to stop auto-showing
+  //    Then show our own banner, and call deferredPrompt.prompt() on click
   window.addEventListener('beforeinstallprompt', e => {
     e.preventDefault();
     deferredPrompt = e;
-    console.log('[GastoCerto] beforeinstallprompt fired ✅');
-    // Show after splash disappears
-    setTimeout(showBanner, 4000);
+    console.log('[PWA] beforeinstallprompt captured ✅');
+    // Show install banner after splash finishes (~3s)
+    setTimeout(() => {
+      if (banner && !isStandalone()) banner.classList.add('show');
+    }, 3500);
   });
 
-  // ── Fallback banner for browsers that support PWA but fire prompt late ──
-  setTimeout(() => {
-    if (!bannerShown && !isStandalone() && !isIOS()) {
-      showBanner();
-    }
-  }, 6000);
-
-  // ── Install button click ──
+  // 5. Install button — ONLY triggers native Chrome dialog
   if (btnInst) {
     btnInst.addEventListener('click', async () => {
-      if (banner) banner.classList.remove('show');
-      if (deferredPrompt) {
-        try {
-          await deferredPrompt.prompt();
-          const { outcome } = await deferredPrompt.userChoice;
-          console.log('[GastoCerto] Install outcome:', outcome);
-        } catch(e) {
-          console.warn('[GastoCerto] prompt error:', e);
-        }
-        deferredPrompt = null;
-      } else {
-        // Manual instruction fallback
-        const ua = navigator.userAgent;
-        let msg = 'Para instalar o GastoCerto:\n\n';
-        if (/samsung/i.test(ua))      msg += 'Samsung Internet: Menu → Adicionar página a → Tela inicial';
-        else if (/chrome/i.test(ua))  msg += 'Chrome: Menu (⋮) → "Instalar aplicativo" ou "Adicionar à tela inicial"';
-        else if (/firefox/i.test(ua)) msg += 'Firefox: Menu (≡) → Instalar';
-        else if (/edg/i.test(ua))     msg += 'Edge: Menu → Aplicativos → Instalar este site como aplicativo';
-        else                          msg += 'Use o menu do navegador → Adicionar à tela inicial';
-        alert(msg);
+      if (!deferredPrompt) {
+        // beforeinstallprompt didn't fire yet — do nothing, just hide banner
+        if (banner) banner.classList.remove('show');
+        return;
       }
+      if (banner) banner.classList.remove('show');
+      deferredPrompt.prompt();
+      const { outcome } = await deferredPrompt.userChoice;
+      console.log('[PWA] user choice:', outcome);
+      deferredPrompt = null;
     });
   }
 
-  if (btnDis) btnDis.addEventListener('click', () => {
+  // 6. Dismiss button
+  if (btnDis) {
+    btnDis.addEventListener('click', () => {
+      if (banner) banner.classList.remove('show');
+    });
+  }
+
+  // 7. App installed confirmation
+  window.addEventListener('appinstalled', () => {
+    console.log('[PWA] App installed! ✅');
     if (banner) banner.classList.remove('show');
+    deferredPrompt = null;
   });
 
-  // ── iOS Safari instructions ──
+  // 8. iOS Safari — show manual instructions
   if (isIOS() && !isStandalone()) {
     setTimeout(() => {
       if (iosBanner) iosBanner.classList.add('show');
-    }, 5000);
+    }, 4000);
   }
-  if (iosClose) iosClose.addEventListener('click', () => {
-    if (iosBanner) iosBanner.classList.remove('show');
-  });
-
-  // ── App installed event ──
-  window.addEventListener('appinstalled', () => {
-    console.log('[GastoCerto] App installed! ✅');
-    if (banner) banner.classList.remove('show');
-    deferredPrompt = null;
-    bannerShown = true;
-  });
-
+  if (iosClose) {
+    iosClose.addEventListener('click', () => {
+      if (iosBanner) iosBanner.classList.remove('show');
+    });
+  }
 })();
 </script>
 </body>
