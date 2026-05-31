@@ -1,4 +1,4 @@
-const CACHE = 'gc-pwa-v1';
+const CACHE = 'gc-pwa-v2';
 const BASE  = '/GastoCerto/';
 
 self.addEventListener('install', e => {
@@ -8,8 +8,8 @@ self.addEventListener('install', e => {
       BASE,
       BASE + 'index.html',
       BASE + 'manifest.json',
-      BASE + 'icons/icon-192x192.png',
-      BASE + 'icons/icon-512x512.png'
+      BASE + 'icon-192x192.png',
+      BASE + 'icon-512x512.png',
     ]))
   );
 });
