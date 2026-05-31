@@ -183,55 +183,7 @@ body.pwa-installed #ibanner,
 body.pwa-installed #ios-banner { display: none !important; }
 
 </style>
-<script>
-// Dynamic manifest: sets correct start_url for the current GitHub Pages path
-(function() {
-  try {
-    var path = window.location.pathname.replace(/index\.html$/, '');
-    var manifestData = {
-      "name": "GastoCerto – Seu dinheiro, do jeito certo.",
-      "short_name": "GastoCerto",
-      "description": "Controle financeiro inteligente.",
-      "start_url": path || "/",
-      "scope": path || "/",
-      "display": "standalone",
-      "display_override": ["standalone","minimal-ui"],
-      "background_color": "#0A2540",
-      "theme_color": "#0A2540",
-      "orientation": "portrait-primary",
-      "lang": "pt-BR",
-      "prefer_related_applications": false,
-      "icons": [
-        {"src": "icons/icon-72x72.png",   "sizes": "72x72",   "type": "image/png", "purpose": "any"},
-        {"src": "icons/icon-96x96.png",   "sizes": "96x96",   "type": "image/png", "purpose": "any"},
-        {"src": "icons/icon-128x128.png", "sizes": "128x128", "type": "image/png", "purpose": "any"},
-        {"src": "icons/icon-144x144.png", "sizes": "144x144", "type": "image/png", "purpose": "any"},
-        {"src": "icons/icon-152x152.png", "sizes": "152x152", "type": "image/png", "purpose": "any"},
-        {"src": "icons/icon-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
-        {"src": "icons/icon-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
-        {"src": "icons/icon-384x384.png", "sizes": "384x384", "type": "image/png", "purpose": "any"},
-        {"src": "icons/icon-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
-        {"src": "icons/icon-512x512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"}
-      ],
-      "screenshots": [
-        {"src": "icons/icon-512x512.png","sizes":"512x512","type":"image/png","form_factor":"narrow","label":"GastoCerto"}
-      ]
-    };
-    var blob = new Blob([JSON.stringify(manifestData)], {type: 'application/manifest+json'});
-    var url  = URL.createObjectURL(blob);
-    // Replace manifest link href with dynamic one
-    document.addEventListener('DOMContentLoaded', function() {
-      var el = document.querySelector('link[rel="manifest"]');
-      if (el) el.href = url;
-    });
-    // Also set immediately if possible
-    var el = document.querySelector('link[rel="manifest"]');
-    if (el) el.href = url;
-  } catch(e) {
-    console.log('manifest dynamic error:', e);
-  }
-})();
-</script>
+
 </head>
 <body>
 
@@ -1315,7 +1267,7 @@ render();
   // ── Service Worker Registration ──
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js', { scope: './' })
+      navigator.serviceWorker.register('./sw.js', { scope: '/GastoCerto/' })
         .then(reg => {
           console.log('[GastoCerto] SW scope:', reg.scope);
           reg.update();

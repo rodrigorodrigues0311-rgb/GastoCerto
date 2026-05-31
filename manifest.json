@@ -1,46 +1,19 @@
 {
-  "name": "GastoCerto – Seu dinheiro, do jeito certo.",
+  "name": "GastoCerto",
   "short_name": "GastoCerto",
-  "description": "Controle financeiro inteligente com análise e sugestões de investimentos.",
-  "start_url": ".",
-  "scope": ".",
+  "description": "Controle financeiro inteligente.",
+  "start_url": "/GastoCerto/",
+  "scope": "/GastoCerto/",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
   "background_color": "#0A2540",
   "theme_color": "#0A2540",
   "orientation": "portrait-primary",
   "lang": "pt-BR",
-  "dir": "ltr",
-  "categories": ["finance", "productivity"],
   "prefer_related_applications": false,
   "icons": [
     {
-      "src": "icons/icon-72x72.png",
-      "sizes": "72x72",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-96x96.png",
-      "sizes": "96x96",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-128x128.png",
-      "sizes": "128x128",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-144x144.png",
-      "sizes": "144x144",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-152x152.png",
-      "sizes": "152x152",
+      "src": "icons/icon-192x192.png",
+      "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
@@ -51,14 +24,8 @@
       "purpose": "maskable"
     },
     {
-      "src": "icons/icon-192x192.png",
-      "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any"
-    },
-    {
-      "src": "icons/icon-384x384.png",
-      "sizes": "384x384",
+      "src": "icons/icon-512x512.png",
+      "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
     },
@@ -67,21 +34,6 @@
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "maskable"
-    },
-    {
-      "src": "icons/icon-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any"
-    }
-  ],
-  "screenshots": [
-    {
-      "src": "icons/icon-512x512.png",
-      "sizes": "512x512",
-      "type": "image/png",
-      "form_factor": "narrow",
-      "label": "GastoCerto – Controle Financeiro"
     }
   ]
 }
