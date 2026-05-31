@@ -2,7 +2,7 @@
   "name": "GastoCerto",
   "short_name": "GastoCerto",
   "description": "Controle financeiro inteligente.",
-  "start_url": "/GastoCerto/",
+  "start_url": "/GastoCerto/index.html",
   "scope": "/GastoCerto/",
   "display": "standalone",
   "background_color": "#0A2540",

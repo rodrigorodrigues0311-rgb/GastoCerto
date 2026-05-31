@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>GastoCerto — Debug PWA</title>
+<style>
+body{font-family:monospace;background:#0A2540;color:#fff;padding:16px;font-size:13px}
+h2{color:#1DB954;margin-bottom:12px}
+.ok{color:#1DB954}.err{color:#E63946}.warn{color:#F4A261}
+.box{background:rgba(255,255,255,.08);border-radius:8px;padding:12px;margin-bottom:10px}
+button{background:#1DB954;border:none;border-radius:8px;color:#fff;padding:10px 18px;font-size:14px;font-weight:700;cursor:pointer;margin:4px}
+pre{white-space:pre-wrap;word-break:break-all;font-size:11px;margin-top:8px}
+</style>
+</head>
+<body>
+<h2>🔍 GastoCerto — Debug PWA</h2>
+<div class="box" id="results">Verificando...</div>
+<div class="box">
+  <b>Ações:</b><br>
+  <button onclick="checkSW()">Verificar SW</button>
+  <button onclick="checkManifest()">Verificar Manifest</button>
+  <button onclick="clearAll()">Limpar Cache/SW</button>
+  <button onclick="triggerInstall()">Forçar Install</button>
+</div>
+<div class="box" id="log"><b>Log:</b><pre id="logpre"></pre></div>
+
+<script>
+var log = [];
+var deferredPrompt = null;
+
+function addLog(msg, type) {
+  var t = type||'info';
+  var prefix = t==='ok'?'✅ ':t==='err'?'❌ ':t==='warn'?'⚠️ ':'ℹ️ ';
+  log.push(prefix + msg);
+  document.getElementById('logpre').textContent = log.join('\n');
+}
+
+window.addEventListener('beforeinstallprompt', function(e) {
+  e.preventDefault();
+  deferredPrompt = e;
+  addLog('beforeinstallprompt FIRED! Chrome aprovou o PWA ✅', 'ok');
+  document.getElementById('results').innerHTML = 
+    '<span class="ok">✅ PWA APROVADO! Chrome pode instalar como app.</span><br>' +
+    'Clique em "Forçar Install" para testar.';
+});
+
+window.addEventListener('appinstalled', function() {
+  addLog('appinstalled event fired — APP INSTALADO!', 'ok');
+});
+
+async function checkSW() {
+  if (!('serviceWorker' in navigator)) {
+    addLog('Service Worker NÃO suportado neste browser', 'err'); return;
+  }
+  addLog('Service Worker: suportado', 'ok');
+  try {
+    var regs = await navigator.serviceWorker.getRegistrations();
+    if (regs.length === 0) {
+      addLog('SW: NENHUM registrado! Isso é o problema.', 'err');
+    } else {
+      regs.forEach(function(r) {
+        addLog('SW registrado: scope=' + r.scope + ' state=' + (r.active ? r.active.state : 'sem active'), 'ok');
+      });
+    }
+    var current = await navigator.serviceWorker.ready;
+    addLog('SW ready: ' + current.scope, 'ok');
+  } catch(e) {
+    addLog('SW error: ' + e.message, 'err');
+  }
+}
+
+async function checkManifest() {
+  try {
+    var r = await fetch('./manifest.json');
+    if (!r.ok) { addLog('manifest.json: HTTP ' + r.status, 'err'); return; }
+    var ct = r.headers.get('content-type')||'';
+    addLog('manifest.json: HTTP 200 OK', 'ok');
+    addLog('Content-Type: ' + ct, ct.includes('json') ? 'ok' : 'warn');
+    var mf = await r.json();
+    addLog('name: ' + mf.name, 'ok');
+    addLog('display: ' + mf.display, mf.display==='standalone'?'ok':'err');
+    addLog('start_url: ' + mf.start_url, 'ok');
+    addLog('scope: ' + mf.scope, 'ok');
+    addLog('icons count: ' + (mf.icons||[]).length, (mf.icons||[]).length>=2?'ok':'err');
+    var has192 = (mf.icons||[]).some(function(i){return i.sizes==='192x192';});
+    var has512 = (mf.icons||[]).some(function(i){return i.sizes==='512x512';});
+    addLog('icon 192x192: ' + has192, has192?'ok':'err');
+    addLog('icon 512x512: ' + has512, has512?'ok':'err');
+    // Check if icons are accessible
+    if (mf.icons && mf.icons[0]) {
+      var ir = await fetch(mf.icons.find(function(i){return i.sizes==='192x192';}).src || mf.icons[0].src);
+      addLog('icon-192 fetch: HTTP ' + ir.status, ir.ok?'ok':'err');
+    }
+  } catch(e) {
+    addLog('Manifest error: ' + e.message, 'err');
+  }
+}
+
+async function clearAll() {
+  // Unregister all SWs
+  var regs = await navigator.serviceWorker.getRegistrations();
+  for (var r of regs) { await r.unregister(); addLog('SW unregistered: ' + r.scope, 'warn'); }
+  // Clear caches
+  var keys = await caches.keys();
+  for (var k of keys) { await caches.delete(k); addLog('Cache deleted: ' + k, 'warn'); }
+  addLog('Limpeza concluída. Recarregue a página.', 'ok');
+  setTimeout(function(){ location.reload(); }, 1500);
+}
+
+async function triggerInstall() {
+  if (!deferredPrompt) {
+    addLog('beforeinstallprompt ainda não disparou.', 'warn');
+    addLog('Motivos possíveis:', 'warn');
+    addLog('1. manifest.json com erro (clique "Verificar Manifest")', 'warn');
+    addLog('2. SW não registrado (clique "Verificar SW")', 'warn');
+    addLog('3. App já instalado', 'warn');
+    addLog('4. Chrome bloqueou (já recusou antes — limpe dados do site)', 'warn');
+    return;
+  }
+  deferredPrompt.prompt();
+  var r = await deferredPrompt.userChoice;
+  addLog('Resultado: ' + r.outcome, r.outcome==='accepted'?'ok':'warn');
+  deferredPrompt = null;
+}
+
+// Auto-run checks on load
+window.addEventListener('load', async function() {
+  addLog('URL atual: ' + location.href, 'ok');
+  addLog('HTTPS: ' + (location.protocol==='https:'), location.protocol==='https:'?'ok':'err');
+  addLog('display-mode standalone: ' + window.matchMedia('(display-mode: standalone)').matches, 'ok');
+  await checkSW();
+  await checkManifest();
+});
+</script>
+</body>
+</html>
