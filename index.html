@@ -200,16 +200,14 @@ body.pwa-installed #ios-banner { display: none !important; }
 </style>
 
 
-<!-- Firebase SDKs -->
-<script type="module">
-  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
-  import { getFirestore, doc, getDoc, setDoc, onSnapshot }
-    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
-  import { getAuth, signInAnonymously, onAuthStateChanged }
-    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
 
-  // ── Firebase config — substitua pelos seus dados ──
-  const firebaseConfig = {
+<!-- Firebase CDN compat (funciona sem type=module) -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script>
+(function() {
+  var cfg = {
     apiKey:            "AIzaSyCA4z_LJhQ1ZK-YAZgjnYfxKrjZx8iz-G8",
     authDomain:        "gastocerto-7da6d.firebaseapp.com",
     projectId:         "gastocerto-7da6d",
@@ -218,86 +216,129 @@ body.pwa-installed #ios-banner { display: none !important; }
     appId:             "1:264328179853:web:5f8deb2cc373f85149b2c4"
   };
 
-  const app  = initializeApp(firebaseConfig);
-  const db   = getFirestore(app);
-  const auth = getAuth(app);
+  try {
+    firebase.initializeApp(cfg);
+  } catch(e) {
+    if (e.code !== 'app/duplicate-app') console.error('[Firebase] init error:', e);
+  }
 
-  // Expose globally so the rest of the app can use
-  window._fb = { db, auth, doc, getDoc, setDoc, onSnapshot };
+  var db   = firebase.firestore();
+  var auth = firebase.auth();
 
-  onAuthStateChanged(auth, async user => {
-    const dot = document.getElementById('sync-dot');
-    if (!user) {
-      if (dot) { dot.className = 'error'; dot.title = 'Não autenticado'; }
-      return;
+  function getDot() { return document.getElementById('sync-dot'); }
+
+  function setDot(cls, title) {
+    var d = getDot();
+    if (d) { d.className = cls || ''; d.title = title || ''; }
+  }
+
+  function showToast(msg) {
+    var t = document.getElementById('fb-toast');
+    if (!t) {
+      t = document.createElement('div');
+      t.id = 'fb-toast';
+      t.style.cssText = 'position:fixed;bottom:85px;left:50%;transform:translateX(-50%);background:#E63946;color:#fff;padding:8px 16px;border-radius:10px;font-size:12px;font-family:Inter,sans-serif;z-index:9000;max-width:300px;text-align:center;box-shadow:0 4px 16px rgba(0,0,0,.4)';
+      document.body.appendChild(t);
     }
-    window._fbUid = user.uid;
-    if (dot) { dot.className = 'syncing'; dot.title = 'Carregando dados...'; }
-    console.log('[Firebase] UID:', user.uid);
+    t.textContent = msg;
+    t.style.display = 'block';
+    clearTimeout(t._t);
+    t._t = setTimeout(function() { t.style.display = 'none'; }, 8000);
+  }
 
-    const ref = doc(db, 'users', user.uid);
-    try {
-      const snap = await getDoc(ref);
-      if (snap.exists()) {
-        window._mergeFromCloud(snap.data());
-        if (typeof render === 'function') render();
-        console.log('[Firebase] Data loaded ✅');
-      } else {
-        await window._pushToCloud();
-        console.log('[Firebase] First push ✅');
+  window._showFbError = showToast;
+
+  window._pushToCloud = function() {
+    if (!window._fbUid) return Promise.resolve();
+    setDot('syncing', 'Salvando...');
+    window._fbWriting = true;
+    return db.collection('users').doc(window._fbUid).set({
+      user:         S.user,
+      accounts:     S.accounts,
+      transactions: S.transactions,
+      budgets:      S.budgets,
+      goals:        S.goals,
+      cats:         S.cats,
+      updatedAt:    new Date().toISOString()
+    }).then(function() {
+      setDot('ok', 'Sincronizado ✅');
+      setTimeout(function() { window._fbWriting = false; }, 500);
+    }).catch(function(e) {
+      console.warn('[Firebase] push error:', e.code, e.message);
+      setDot('error', 'Erro: ' + e.code);
+      showToast('🔴 Erro ao salvar: ' + (e.code || e.message));
+      window._fbWriting = false;
+    });
+  };
+
+  window._mergeFromCloud = function(data) {
+    if (!data) return;
+    if (data.user)         S.user         = data.user;
+    if (data.accounts)     S.accounts     = data.accounts;
+    if (data.transactions) S.transactions = data.transactions;
+    if (data.budgets)      S.budgets      = data.budgets;
+    if (data.goals)        S.goals        = data.goals;
+    if (data.cats)         S.cats         = data.cats;
+    saveLocal();
+  };
+
+  // Wait for DOM + app to be ready
+  function startFirebase() {
+    setDot('syncing', 'Conectando ao Firebase...');
+
+    auth.signInAnonymously().catch(function(e) {
+      console.error('[Firebase] signIn error:', e.code, e.message);
+      setDot('error', 'Erro auth: ' + e.code);
+      showToast('🔴 Firebase: ' + e.code);
+    });
+
+    auth.onAuthStateChanged(function(user) {
+      if (!user) {
+        setDot('error', 'Não autenticado');
+        return;
       }
-      if (dot) { dot.className = ''; dot.title = 'Sincronizado ✅'; }
-    } catch(e) {
-      console.warn('[Firebase] load error:', e.code, e.message);
-      if (dot) { dot.className = 'error'; dot.title = 'Erro: ' + e.message; }
-      window._showFbError && window._showFbError(e.code || e.message);
-    }
+      window._fbUid = user.uid;
+      setDot('syncing', 'Carregando dados...');
+      console.log('[Firebase] UID:', user.uid);
 
-    onSnapshot(ref,
-      snap => {
-        if (snap.exists() && !window._fbWriting) {
+      var ref = db.collection('users').doc(user.uid);
+
+      ref.get().then(function(snap) {
+        if (snap.exists) {
           window._mergeFromCloud(snap.data());
           if (typeof render === 'function') render();
+          console.log('[Firebase] Dados carregados ✅');
+        } else {
+          return window._pushToCloud();
         }
-        if (dot) { dot.className = ''; dot.title = 'Sincronizado ✅'; }
-      },
-      err => {
+        setDot('ok', 'Sincronizado ✅');
+      }).catch(function(e) {
+        console.warn('[Firebase] load error:', e.code, e.message);
+        setDot('error', 'Erro: ' + e.code);
+        showToast('🔴 Firebase erro: ' + (e.code || e.message));
+      });
+
+      // Realtime listener
+      ref.onSnapshot(function(snap) {
+        if (snap.exists && !window._fbWriting) {
+          window._mergeFromCloud(snap.data());
+          if (typeof render === 'function') render();
+          setDot('ok', 'Sincronizado ✅');
+        }
+      }, function(err) {
         console.warn('[Firebase] snapshot error:', err.code);
-        if (dot) { dot.className = 'error'; dot.title = 'Erro sync: ' + err.code; }
-      }
-    );
-  });
+        setDot('error', 'Erro sync: ' + err.code);
+      });
+    });
+  }
 
-  signInAnonymously(auth).catch(e => {
-    console.error('[Firebase] signIn error:', e.code, e.message);
-    const dot = document.getElementById('sync-dot');
-    if (dot) { dot.className = 'error'; dot.title = 'Erro auth: ' + e.code; }
-    // Show visible error toast
-    window._showFbError('Auth: ' + (e.code || e.message));
-  });
-
-  window._showFbError = function(msg) {
-    let toast = document.getElementById('fb-toast');
-    if (!toast) {
-      toast = document.createElement('div');
-      toast.id = 'fb-toast';
-      toast.style.cssText = [
-        'position:fixed','bottom:85px','left:50%',
-        'transform:translateX(-50%)',
-        'background:#E63946','color:#fff',
-        'padding:8px 16px','border-radius:10px',
-        'font-size:12px','font-family:Inter,sans-serif',
-        'z-index:9000','max-width:320px','text-align:center',
-        'box-shadow:0 4px 16px rgba(0,0,0,.4)'
-      ].join(';');
-      document.body.appendChild(toast);
-    }
-    toast.textContent = '🔴 Firebase: ' + msg;
-    toast.style.display = 'block';
-    // Auto hide after 10s
-    clearTimeout(toast._t);
-    toast._t = setTimeout(() => toast.style.display = 'none', 10000);
-  };
+  // Start after page loads
+  if (document.readyState === 'complete') {
+    startFirebase();
+  } else {
+    window.addEventListener('load', startFirebase);
+  }
+})();
 </script>
 </head>
 <body>
@@ -451,10 +492,7 @@ window._pushToCloud = async function() {
 // ── saveS: save locally AND push to cloud ──
 function saveS(){
   saveLocal();
-  window._pushToCloud();
-  // Update dot to syncing
-  const d = document.getElementById('sync-dot');
-  if (d) { d.className = 'syncing'; d.title = 'Salvando...'; }
+  if (window._pushToCloud) window._pushToCloud();
 }
 
 // ── loadS: load from local cache (cloud loads async via onAuthStateChanged) ──
