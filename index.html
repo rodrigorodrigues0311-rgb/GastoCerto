@@ -1207,6 +1207,40 @@ $('bnav').addEventListener('click',e=>{
 });
 
 // Initial render
+// ── Firebase status helpers (defined here so render() can call applyDot) ──
+window._fbState = {c:'', t:'...'};
+
+function applyDot(){
+  var c = window._fbState.c;
+  var t = window._fbState.t;
+  var idot = document.getElementById('fb-status-dot-inline');
+  var itxt = document.getElementById('fb-status-txt-inline');
+  var ibox = document.getElementById('fb-status-inline');
+  if(!idot||!itxt||!ibox) return;
+  var color  = c==='ok'?'#1DB954':c==='syncing'?'#F4A261':c==='error'?'#E63946':'#ccc';
+  var bg     = c==='ok'?'#E8F5E9':c==='syncing'?'#FFF3E0':c==='error'?'#FFF0F1':'#f0f0f0';
+  var tcolor = c==='ok'?'#1DB954':c==='syncing'?'#c45000':c==='error'?'#E63946':'#888';
+  var label  = c==='ok'?'Salvo'  :c==='syncing'?'Sincron.':c==='error'?'Erro'   :'Nuvem';
+  idot.style.background = color;
+  ibox.style.background = bg;
+  itxt.style.color      = tcolor;
+  itxt.textContent      = label;
+  idot.style.animation  = c==='syncing'?'fbpulse .6s ease-in-out infinite alternate':'none';
+}
+
+function dot(c,t){
+  window._fbState = {c:c, t:t||''};
+  applyDot();
+  if(c==='ok'){
+    clearTimeout(window._fbOkTimer);
+    window._fbOkTimer = setTimeout(function(){
+      window._fbState={c:'idle',t:'Nuvem'};
+      applyDot();
+    },3000);
+  }
+}
+
+
 render();
 
 /* ══ CLOCK ══ */
@@ -1332,39 +1366,7 @@ render();
 var CFG={apiKey:"AIzaSyCA4z_LJhQ1ZK-YAZgjnYfxKrjZx8iz-G8",authDomain:"gastocerto-7da6d.firebaseapp.com",projectId:"gastocerto-7da6d",storageBucket:"gastocerto-7da6d.firebasestorage.app",messagingSenderId:"264328179853",appId:"1:264328179853:web:5f8deb2cc373f85149b2c4"};
 firebase.apps.length?firebase.app():firebase.initializeApp(CFG);
 var db=firebase.firestore(),auth=firebase.auth();
-// Store last Firebase state globally
-window._fbState = {c:'', t:'...'};
-
-function dot(c,t){
-  window._fbState = {c:c, t:t||'...'};
-  applyDot();
-  if(c==='ok'){
-    clearTimeout(window._fbOkTimer);
-    window._fbOkTimer = setTimeout(function(){
-      window._fbState = {c:'idle', t:'Nuvem'};
-      applyDot();
-    }, 3000);
-  }
-}
-
-function applyDot(){
-  var c = window._fbState.c;
-  var t = window._fbState.t;
-  var idot = document.getElementById('fb-status-dot-inline');
-  var itxt = document.getElementById('fb-status-txt-inline');
-  var ibox = document.getElementById('fb-status-inline');
-  if(!idot||!itxt||!ibox) return;
-  var color  = c==='ok'?'#1DB954' : c==='syncing'?'#F4A261' : c==='error'?'#E63946' : '#ccc';
-  var bg     = c==='ok'?'#E8F5E9' : c==='syncing'?'#FFF3E0' : c==='error'?'#FFF0F1' : '#f0f0f0';
-  var tcolor = c==='ok'?'#1DB954' : c==='syncing'?'#c45000' : c==='error'?'#E63946' : '#888';
-  var label  = c==='ok'?'Salvo'   : c==='syncing'?'Sincron.' : c==='error'?'Erro'    : t||'...';
-  idot.style.background = color;
-  ibox.style.background = bg;
-  itxt.style.color      = tcolor;
-  itxt.textContent      = label;
-  // pulse animation for syncing
-  idot.style.animation = c==='syncing' ? 'fbpulse .6s ease-in-out infinite alternate' : 'none';
-}
+// dot() and applyDot() defined in main script
 function toast(m){var e=document.getElementById('fb-toast');if(!e){e=document.createElement('div');e.id='fb-toast';e.style.cssText='position:fixed;bottom:85px;left:50%;transform:translateX(-50%);background:#E63946;color:#fff;padding:10px 18px;border-radius:12px;font-size:13px;z-index:9999;max-width:300px;text-align:center;display:none;font-family:Inter,sans-serif';document.body.appendChild(e);}e.textContent=m;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(function(){e.style.display='none';},8000);}
 window._fbWriting=false;
 window._pushToCloud=function(){if(!window._fbUid)return;dot('syncing','Salvando...');window._fbWriting=true;db.collection('users').doc(window._fbUid).set({user:S.user,accounts:S.accounts,transactions:S.transactions,budgets:S.budgets,goals:S.goals,cats:S.cats,updatedAt:new Date().toISOString()}).then(function(){dot('ok','Sincronizado');setTimeout(function(){window._fbWriting=false;},300);}).catch(function(e){dot('error',e.code);toast('Erro: '+(e.code||e.message));window._fbWriting=false;});};
