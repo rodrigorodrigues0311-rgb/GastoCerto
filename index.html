@@ -276,9 +276,13 @@ function loadS(){
   try{const d=localStorage.getItem(STORE_KEY);return d?JSON.parse(d):null;}
   catch(e){return null;}
 }
-function saveS(){
+function saveLocal(){
   try{localStorage.setItem(STORE_KEY,JSON.stringify(S));}
-  catch(e){console.warn('save error',e);}
+  catch(e){console.warn('saveLocal error',e);}
+}
+function saveS(){
+  saveLocal();
+  if(typeof window._pushToCloud==='function') window._pushToCloud();
 }
 const DEF={
   user:{name:'Usuário',email:'',phone:'',occupation:'',photo:null},
@@ -490,9 +494,9 @@ SCR.dashboard=()=>{
   <div style="background:#fff;padding:12px 16px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:40">
     <button onclick="go('menu')" style="font-size:22px;color:var(--P);padding:0;line-height:1">☰</button>
     <div class="f1" style="display:flex;align-items:center;justify-content:center">${LOGO_HTML}</div>
-    <div id="fb-status-inline" style="display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#f0f0f0;font-size:10px;font-weight:600;color:#888">
-      <div id="fb-status-dot-inline" style="width:7px;height:7px;border-radius:50%;background:#ccc;flex-shrink:0"></div>
-      <span id="fb-status-txt-inline">...</span>
+    <div id="fb-status-inline" style="display:flex;align-items:center;gap:4px;padding:4px 9px;border-radius:99px;background:#EEF2FF;border:1px solid #C7D2FE;font-size:10px;font-weight:700;color:#4F46E5">
+      <div id="fb-status-dot-inline" style="width:7px;height:7px;border-radius:50%;background:#818CF8;flex-shrink:0"></div>
+      <span id="fb-status-txt-inline">☁</span>
     </div>
     <button onclick="go('notif')" style="font-size:20px;padding:0;color:var(--muted);line-height:1">🔔</button>
     <button onclick="go('perfil')" style="width:34px;height:34px;border-radius:50%;overflow:hidden;border:2px solid var(--P);flex-shrink:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:0">
@@ -948,7 +952,6 @@ window.handlePhoto=function(e){
 };
 
 window.savePerfil=function(){
-  // Read values directly from DOM
   const nameEl=$('p-name');
   const emailEl=$('p-email');
   const phoneEl=$('p-phone');
@@ -958,13 +961,35 @@ window.savePerfil=function(){
   S.user.email=emailEl?emailEl.value.trim():'';
   S.user.phone=phoneEl?phoneEl.value.trim():'';
   S.user.occupation=occEl?occEl.value.trim():'';
-  saveS();
-  // Show success feedback
-  const btn=$('btn-save-perfil');
-  if(btn){btn.textContent='✅ Salvo!';btn.style.background='#1DB954';setTimeout(()=>{if(btn){btn.textContent='✓ Salvar perfil';btn.style.background='var(--P)';}},1500);}
-  // Re-render to update name everywhere but stay on perfil screen
-  // Update the greeting without full re-render
-  setTimeout(()=>render(),100);
+  // Save locally first
+  saveLocal();
+  // Push to Firebase with explicit feedback
+  var btn=$('btn-save-perfil');
+  if(btn){btn.textContent='⏳ Salvando...';btn.style.background='#F4A261';btn.disabled=true;}
+  if(typeof window._pushToCloud==='function' && window._fbUid){
+    var origPush=window._pushToCloud;
+    var _db=typeof db!=='undefined'?db:(firebase&&firebase.apps.length?firebase.firestore():null);
+    if(!_db){if(btn){btn.textContent='⚠️ Sem conexão';btn.style.background='#F4A261';btn.disabled=false;}return;}
+    _db.collection('users').doc(window._fbUid).set({
+      user:S.user,accounts:S.accounts,transactions:S.transactions,
+      budgets:S.budgets,goals:S.goals,cats:S.cats,
+      updatedAt:new Date().toISOString()
+    }).then(function(){
+      if(btn){btn.textContent='✅ Salvo na nuvem!';btn.style.background='#1DB954';btn.disabled=false;}
+      dot('ok','Perfil salvo');
+      setTimeout(function(){if(btn){btn.textContent='✓ Salvar perfil';btn.style.background='var(--P)';}},2500);
+    }).catch(function(e){
+      if(btn){btn.textContent='⚠️ Salvo local';btn.style.background='#F4A261';btn.disabled=false;}
+      console.warn('[Perfil] save error:',e.code);
+      setTimeout(function(){if(btn){btn.textContent='✓ Salvar perfil';btn.style.background='var(--P)';}},2500);
+    });
+  } else {
+    // Firebase not ready yet — save locally only
+    if(btn){btn.textContent='⚠️ Salvo local (offline)';btn.style.background='#F4A261';btn.disabled=false;}
+    setTimeout(function(){if(btn){btn.textContent='✓ Salvar perfil';btn.style.background='var(--P)';}},2500);
+  }
+  render(); // update name in dashboard
+
 };
 
 /* ══ CONFIG ══ */
@@ -1212,20 +1237,28 @@ window._fbState = {c:'', t:'...'};
 
 function applyDot(){
   var c = window._fbState.c;
-  var t = window._fbState.t;
   var idot = document.getElementById('fb-status-dot-inline');
   var itxt = document.getElementById('fb-status-txt-inline');
   var ibox = document.getElementById('fb-status-inline');
   if(!idot||!itxt||!ibox) return;
-  var color  = c==='ok'?'#1DB954':c==='syncing'?'#F4A261':c==='error'?'#E63946':'#ccc';
-  var bg     = c==='ok'?'#E8F5E9':c==='syncing'?'#FFF3E0':c==='error'?'#FFF0F1':'#f0f0f0';
-  var tcolor = c==='ok'?'#1DB954':c==='syncing'?'#c45000':c==='error'?'#E63946':'#888';
-  var label  = c==='ok'?'Salvo'  :c==='syncing'?'Sincron.':c==='error'?'Erro'   :'Nuvem';
-  idot.style.background = color;
-  ibox.style.background = bg;
-  itxt.style.color      = tcolor;
-  itxt.textContent      = label;
-  idot.style.animation  = c==='syncing'?'fbpulse .6s ease-in-out infinite alternate':'none';
+  if(c==='ok'){
+    idot.style.background='#1DB954'; ibox.style.background='#E8F5E9';
+    ibox.style.border='1px solid #86EFAC'; itxt.style.color='#16A34A';
+    itxt.textContent='✓ Salvo'; idot.style.animation='none';
+  } else if(c==='syncing'){
+    idot.style.background='#F4A261'; ibox.style.background='#FFF7ED';
+    ibox.style.border='1px solid #FED7AA'; itxt.style.color='#C2410C';
+    itxt.textContent='↑ Sync'; idot.style.animation='fbpulse .6s ease-in-out infinite alternate';
+  } else if(c==='error'){
+    idot.style.background='#E63946'; ibox.style.background='#FFF0F1';
+    ibox.style.border='1px solid #FECACA'; itxt.style.color='#DC2626';
+    itxt.textContent='✗ Erro'; idot.style.animation='none';
+  } else {
+    // idle — still show as connected cloud (blue)
+    idot.style.background='#818CF8'; ibox.style.background='#EEF2FF';
+    ibox.style.border='1px solid #C7D2FE'; itxt.style.color='#4F46E5';
+    itxt.textContent='☁'; idot.style.animation='none';
+  }
 }
 
 function dot(c,t){
