@@ -422,8 +422,9 @@ function render(){
   $('screen').innerHTML=screenFn();
   $('screen').scrollTop=0;
   document.querySelectorAll('.nb').forEach(b=>b.classList.toggle('on',b.dataset.s===curNav&&!curSc));
-  // re-apply firebase status after render (elements recreated)
   if(typeof updateFbUI==='function') updateFbUI(window._fbLastState||'idle');
+  // auto-run simulator when investments screen is visible
+  if((curSc||curNav)==='investimentos' && typeof runSim==='function') setTimeout(runSim,50);
 }
 
 // Seed initial history
@@ -468,7 +469,9 @@ window.showConfirm=showConfirm;
 SCR.dashboard=()=>{
   const txs=txsM(nowM());
   const rec=sumT(txs,'receita'),desp=sumT(txs,'despesa'),res=rec-desp;
-  const bal=S.accounts.reduce((s,a)=>s+(+a.balance||0),0);
+  const bal=S.accounts.reduce((s,a)=>s+(+a.balance||0),0)
+    + S.transactions.filter(t=>t.type==='receita').reduce((s,t)=>s+(+t.amount||0),0)
+    - S.transactions.filter(t=>t.type==='despesa').reduce((s,t)=>s+(+t.amount||0),0);
 
   const now=new Date();
   const prevM=`${now.getMonth()===0?now.getFullYear()-1:now.getFullYear()}-${String(now.getMonth()===0?12:now.getMonth()).padStart(2,'0')}`;
@@ -509,12 +512,12 @@ SCR.dashboard=()=>{
     <div style="font-size:12px;color:var(--muted);margin-top:2px">Aqui está o resumo da sua vida financeira.</div>
   </div>
   <div style="padding:0 16px 14px;background:#fff">
-    <div class="card" style="background:linear-gradient(135deg,#0A2540,#1a3a60);color:#fff;border-radius:18px;position:relative;overflow:hidden">
+    <div class="card" onclick="go('contas')" style="background:linear-gradient(135deg,#0A2540,#1a3a60);color:#fff;border-radius:18px;position:relative;overflow:hidden;cursor:pointer">
       <div style="position:absolute;top:-20px;right:-20px;width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,.05)"></div>
       <div style="font-size:11px;opacity:.65;margin-bottom:2px">Saldo total</div>
       <div style="font-size:30px;font-weight:900;letter-spacing:-1px">${fmt(bal)}</div>
       <div style="height:1px;background:rgba(255,255,255,.12);margin:10px 0"></div>
-      <div class="row" style="gap:0">
+      <div class="row" style="gap:0;margin-bottom:${S.accounts.length?'10px':'0'}">
         <div style="flex:1;padding-right:12px;border-right:1px solid rgba(255,255,255,.15)">
           <div style="font-size:10px;opacity:.5">Contas</div>
           <div style="font-size:13px;font-weight:700">${S.accounts.length} conta${S.accounts.length!==1?'s':''}</div>
@@ -524,15 +527,34 @@ SCR.dashboard=()=>{
           <div style="font-size:13px;font-weight:700">${S.transactions.length} no total</div>
         </div>
       </div>
+      ${S.accounts.length?`<div style="border-top:1px solid rgba(255,255,255,.1);padding-top:8px;display:flex;flex-direction:column;gap:4px">
+        ${S.accounts.map(a=>`<div class="row" style="justify-content:space-between">
+          <div style="font-size:10px;opacity:.65;display:flex;align-items:center;gap:5px">
+            <div style="width:6px;height:6px;border-radius:50%;background:${a.color||'#fff'}"></div>
+            ${a.name}${a.bank?' · '+a.bank:''}
+          </div>
+          <div style="font-size:10px;font-weight:700;opacity:.9">${fmt(+a.balance||0)}</div>
+        </div>`).join('')}
+      </div>`:''}
     </div>
     <div class="row gap8" style="margin-top:10px">
-      ${[['💰','Receita do mês',rec,prec,'#1DB954','#E8F5E9'],['💸','Despesas',desp,pdesp,'#E63946','#FFF0F1'],['📊','Resultado',Math.abs(res),null,res>=0?'#1DB954':'#E63946',res>=0?'#E8F5E9':'#FFF0F1']].map(([ic,lb,v,pv,c,bg])=>`
-      <div class="kc">
-        <div style="width:28px;height:28px;border-radius:8px;background:${bg};display:flex;align-items:center;justify-content:center;font-size:14px;margin-bottom:5px">${ic}</div>
-        <div style="font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px">${lb}</div>
-        <div style="font-size:13px;font-weight:800;color:${c};margin-top:2px">${fmt(v)}</div>
-        ${pv!==null?delta(v,pv):''}
-      </div>`).join('')}
+      <div class="kc" onclick="navTo('lancamentos');window.setTxF('receitas')" style="cursor:pointer">
+        <div style="width:28px;height:28px;border-radius:8px;background:#E8F5E9;display:flex;align-items:center;justify-content:center;font-size:14px;margin-bottom:5px">💰</div>
+        <div style="font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px">Receita do mês</div>
+        <div style="font-size:13px;font-weight:800;color:#1DB954;margin-top:2px">${fmt(rec)}</div>
+        ${delta(rec,prec)}
+      </div>
+      <div class="kc" onclick="navTo('lancamentos');window.setTxF('despesas')" style="cursor:pointer">
+        <div style="width:28px;height:28px;border-radius:8px;background:#FFF0F1;display:flex;align-items:center;justify-content:center;font-size:14px;margin-bottom:5px">💸</div>
+        <div style="font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px">Despesas</div>
+        <div style="font-size:13px;font-weight:800;color:#E63946;margin-top:2px">${fmt(desp)}</div>
+        ${delta(desp,pdesp)}
+      </div>
+      <div class="kc" onclick="navTo('lancamentos')" style="cursor:pointer">
+        <div style="width:28px;height:28px;border-radius:8px;background:${res>=0?'#E8F5E9':'#FFF0F1'};display:flex;align-items:center;justify-content:center;font-size:14px;margin-bottom:5px">📊</div>
+        <div style="font-size:9px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.3px">Resultado</div>
+        <div style="font-size:13px;font-weight:800;color:${res>=0?'#1DB954':'#E63946'};margin-top:2px">${fmt(Math.abs(res))}</div>
+      </div>
     </div>
   </div>
 
@@ -670,21 +692,152 @@ window.navBM=i=>{const now=new Date(),allMs=[];for(let j=-3;j<=3;j++){const d=ne
 SCR.investimentos=()=>{
   const invTxs=S.transactions.filter(t=>t.category==='Investimentos');
   const total=invTxs.reduce((s,t)=>s+(+t.amount||0),0);
+  const profile=window._invProfile||'Conservador';
+  const profiles=['Conservador','Moderado','Arrojado'];
+
+  // Current rates (updated manually - could integrate API)
+  const RATES={
+    Conservador:[
+      {name:'Tesouro Selic',rate:14.65,label:'Selic - 0,10%',tipo:'Renda Fixa',risco:'Baixo',prazo:'Qualquer',ir:'Sim',icon:'🏛️',color:'#1DB954',desc:'Liquidez diária. Ideal para reserva de emergência.'},
+      {name:'CDB 120% CDI',rate:17.58,label:'120% CDI',tipo:'Renda Fixa',risco:'Baixo',prazo:'1-2 anos',ir:'Sim',icon:'🏦',color:'#3A86FF',desc:'Alta rentabilidade com baixo risco. Protegido pelo FGC até R$250k.'},
+      {name:'LCI/LCA 95% CDI',rate:13.94,label:'95% CDI isento IR',tipo:'Renda Fixa',risco:'Baixo',prazo:'2-3 anos',ir:'Não',icon:'🟢',color:'#0A2540',desc:'Isento de IR. Ideal para quem é tributado na tabela progressiva.'},
+      {name:'Poupança',rate:7.79,label:'70% Selic',tipo:'Renda Fixa',risco:'Baixíssimo',prazo:'Qualquer',ir:'Não',icon:'🐷',color:'#8892A4',desc:'Baixíssima rentabilidade. Não recomendada atualmente.'},
+    ],
+    Moderado:[
+      {name:'Tesouro IPCA+ 2029',rate:7.5,label:'IPCA + 7,50%',tipo:'Renda Fixa',risco:'Médio',prazo:'5+ anos',ir:'Sim',icon:'🏛️',color:'#1DB954',desc:'Protege contra inflação. Ideal para aposentadoria.'},
+      {name:'CDB 130% CDI',rate:19.05,label:'130% CDI',tipo:'Renda Fixa',risco:'Baixo-Médio',prazo:'2-3 anos',ir:'Sim',icon:'🏦',color:'#3A86FF',desc:'Rentabilidade superior com liquidez no vencimento.'},
+      {name:'Fundo Multimercado',rate:18.5,label:'~130-150% CDI',tipo:'Fundo',risco:'Médio',prazo:'2+ anos',ir:'Sim',icon:'📊',color:'#F4A261',desc:'Diversificação em várias estratégias. Verifique o histórico.'},
+      {name:'FII MXRF11',rate:12.8,label:'~12% a.a. (dividendos)',tipo:'Renda Variável',risco:'Médio',prazo:'3+ anos',ir:'Não*',icon:'🏢',color:'#7B2D8B',desc:'Fundos imobiliários. Dividendos mensais isentos de IR.'},
+    ],
+    Arrojado:[
+      {name:'ETF BOVA11',rate:22.0,label:'~22% a.a. (histórico)',tipo:'Renda Variável',risco:'Alto',prazo:'5+ anos',ir:'Sim',icon:'📈',color:'#E63946',desc:'Índice Bovespa. Alta volatilidade, maior retorno no longo prazo.'},
+      {name:'ETF IVVB11',rate:28.0,label:'~28% a.a. (histórico)',tipo:'Renda Variável',risco:'Alto',prazo:'5+ anos',ir:'Sim',icon:'🌎',color:'#E63946',desc:'S&P 500 em reais. Exposição ao mercado americano.'},
+      {name:'Ações diversificadas',rate:25.0,label:'~25% a.a. (estimado)',tipo:'Renda Variável',risco:'Alto',prazo:'5+ anos',ir:'Sim',icon:'🔥',color:'#F4A261',desc:'Carteira diversificada de ações. Alto risco, alto potencial.'},
+      {name:'CDB 140% CDI',rate:20.51,label:'140% CDI',tipo:'Renda Fixa',risco:'Baixo',prazo:'3+ anos',ir:'Sim',icon:'🏦',color:'#3A86FF',desc:'Melhor custo-benefício de renda fixa.'},
+    ]
+  };
+  const suggestions=RATES[profile]||RATES.Conservador;
+  const best=suggestions.reduce((a,b)=>a.rate>b.rate?a:b);
+
+  // CDI atual
+  const CDI=14.65;
+
   return`
   <div class="hdr"><h1>Investimentos</h1><button class="icon-btn" onclick="openAddTx()">＋</button></div>
-  <div class="p16" style="padding-bottom:80px">
-    <div class="card" style="background:linear-gradient(135deg,#0A2540,#1a3a60);color:#fff;margin-bottom:14px">
-      <div style="font-size:11px;opacity:.6">Total investido</div>
+  <div style="padding:0 16px 80px">
+
+    <!-- Total card -->
+    <div class="card mt12 mb12" style="background:linear-gradient(135deg,#0A2540,#1a3a60);color:#fff">
+      <div style="font-size:11px;opacity:.6">Total investido (aportes)</div>
       <div style="font-size:26px;font-weight:800;margin-top:2px">${fmt(total)}</div>
+      <div style="font-size:11px;opacity:.5;margin-top:4px">${invTxs.length} aporte${invTxs.length!==1?'s':''} registrado${invTxs.length!==1?'s':''}</div>
     </div>
-    ${invTxs.length===0?`<div class="empty"><div class="empty-i">📈</div><div class="empty-t">Sem investimentos</div><div class="empty-s">Adicione lançamentos na categoria "Investimentos"</div></div>`
-    :`<div class="cl">${[...invTxs].sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div class="cr">
-      <div style="width:34px;height:34px;border-radius:10px;background:#E8F5E9;display:flex;align-items:center;justify-content:center;font-size:18px;margin-right:12px;flex-shrink:0">📈</div>
-      <div class="f1"><div style="font-weight:600;font-size:13px">${t.desc}</div><div style="font-size:11px;color:var(--muted)">${t.date}</div></div>
-      <div style="font-weight:700;font-size:14px;color:#1DB954">+${fmt(t.amount)}</div>
-    </div>`).join('')}</div>`}
+
+    <!-- Profile selector -->
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">Meu perfil de investidor</div>
+    <div class="row gap8 mb12">
+      ${profiles.map(p=>`<button onclick="setInvProfile('${p}')" style="flex:1;padding:9px 4px;border-radius:12px;border:1.5px solid ${profile===p?'#0A2540':'var(--border)'};background:${profile===p?'#0A2540':'#fff'};color:${profile===p?'#fff':'var(--text)'};font-weight:700;font-size:11px;font-family:Inter,sans-serif">${p}</button>`).join('')}
+    </div>
+
+    <!-- Best pick banner -->
+    <div class="card mb12" style="background:linear-gradient(135deg,#1DB954,#0f9e45);color:#fff;border-radius:16px">
+      <div style="font-size:11px;opacity:.8;margin-bottom:4px">⭐ MELHOR OPÇÃO AGORA — ${profile}</div>
+      <div style="font-size:18px;font-weight:800">${best.name}</div>
+      <div style="font-size:13px;opacity:.85;margin-top:2px">${best.label} · ${fmt(1000*(1+best.rate/100))} em 1 ano p/ R$1.000</div>
+      <div style="font-size:11px;opacity:.7;margin-top:4px">${best.desc}</div>
+    </div>
+
+    <!-- Suggestions -->
+    <div style="font-weight:700;font-size:13px;margin-bottom:8px">Opções recomendadas — ${profile}</div>
+    <div class="col gap10 mb16">
+      ${suggestions.map((s,i)=>`<div class="card" style="border-left:4px solid ${s.color}">
+        <div class="row gap10">
+          <span style="font-size:24px">${s.icon}</span>
+          <div class="f1">
+            <div class="row" style="justify-content:space-between;margin-bottom:2px">
+              <div style="font-weight:700;font-size:14px">${s.name}</div>
+              <div style="font-weight:800;font-size:14px;color:${s.color}">${s.rate.toFixed(2)}%</div>
+            </div>
+            <div style="font-size:11px;color:var(--muted)">${s.tipo} · Risco: ${s.risco} · IR: ${s.ir}</div>
+            <div style="font-size:11px;color:var(--muted)">Prazo: ${s.prazo}</div>
+            <div style="font-size:11px;color:var(--text);margin-top:4px">${s.desc}</div>
+          </div>
+        </div>
+      </div>`).join('')}
+    </div>
+
+    <!-- Simulator -->
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px">🧮 Simulador de Rentabilidade</div>
+    <div class="card mb12">
+      <div class="row gap10 mb12">
+        <div class="f1">
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:4px;text-transform:uppercase">Valor (R$)</div>
+          <input id="sim-val" type="number" value="1000" min="0" step="100"
+            style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);font-size:16px;font-weight:800;color:var(--P);text-align:center;box-sizing:border-box"
+            oninput="runSim()">
+        </div>
+        <div class="f1">
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin-bottom:4px;text-transform:uppercase">Período</div>
+          <select id="sim-yr" onchange="runSim()"
+            style="width:100%;padding:10px 12px;border-radius:10px;border:1.5px solid var(--border);font-size:14px;color:var(--text);background:#fff;box-sizing:border-box;font-family:Inter,sans-serif">
+            ${[1,2,3,5,10].map(y=>`<option value="${y}">${y} ano${y>1?'s':''}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div id="sim-results" style="display:flex;flex-direction:column;gap:6px"></div>
+    </div>
+
+    <!-- Comparador -->
+    <div style="font-weight:700;font-size:14px;margin-bottom:10px">📊 Comparativo de Índices</div>
+    <div class="card mb12">
+      ${[['CDI',CDI,'#3A86FF'],['IPCA (proj.)',5.5,'#F4A261'],['Poupança',7.79,'#8892A4'],['Selic',14.75,'#1DB954']].map(([n,r,c])=>`
+      <div class="row" style="padding:7px 0;border-bottom:1px solid var(--border)">
+        <span class="f1" style="font-size:13px;font-weight:600">${n}</span>
+        <div style="width:120px;height:6px;background:var(--border);border-radius:99px;overflow:hidden;margin-right:8px">
+          <div style="width:${Math.min((r/20)*100,100)}%;height:100%;background:${c};border-radius:99px"></div>
+        </div>
+        <span style="font-size:13px;font-weight:800;color:${c};width:50px;text-align:right">${r.toFixed(2)}%</span>
+      </div>`).join('')}
+      <div style="font-size:10px;color:var(--muted);margin-top:8px">* Taxas de referência. Consulte sempre seu banco/corretora.</div>
+    </div>
+
+    <!-- My investments -->
+    ${invTxs.length?`<div style="font-weight:700;font-size:14px;margin-bottom:8px">Meus aportes</div>
+    <div class="cl">
+      ${[...invTxs].sort((a,b)=>b.date.localeCompare(a.date)).map(t=>`<div class="cr">
+        <div style="width:34px;height:34px;border-radius:10px;background:#E8F5E9;display:flex;align-items:center;justify-content:center;font-size:18px;margin-right:12px;flex-shrink:0">📈</div>
+        <div class="f1"><div style="font-weight:600;font-size:13px">${t.desc}</div><div style="font-size:11px;color:var(--muted)">${t.date}</div></div>
+        <div style="font-weight:700;font-size:14px;color:#1DB954">+${fmt(t.amount)}</div>
+      </div>`).join('')}
+    </div>`:''}
   </div>
   <button class="fab" onclick="openAddTx()">＋</button>`;
+};
+
+window.setInvProfile=function(p){window._invProfile=p;render();};
+window.runSim=function(){
+  var val=parseFloat(document.getElementById('sim-val')&&document.getElementById('sim-val').value)||1000;
+  var yr=parseFloat(document.getElementById('sim-yr')&&document.getElementById('sim-yr').value)||1;
+  var profile=window._invProfile||'Conservador';
+  var RATES2={
+    Conservador:[['Tesouro Selic',14.65,'#1DB954'],['CDB 120% CDI',17.58,'#3A86FF'],['LCI/LCA 95% CDI',13.94,'#0A2540'],['Poupança',7.79,'#8892A4']],
+    Moderado:[['Tesouro IPCA+',15.5,'#1DB954'],['CDB 130% CDI',19.05,'#3A86FF'],['Fundo MM',18.5,'#F4A261'],['FII',12.8,'#7B2D8B']],
+    Arrojado:[['ETF BOVA11',22.0,'#E63946'],['ETF IVVB11',28.0,'#E63946'],['Ações',25.0,'#F4A261'],['CDB 140%',20.51,'#3A86FF']]
+  };
+  var rates=RATES2[profile]||RATES2.Conservador;
+  var el=document.getElementById('sim-results');
+  if(!el)return;
+  var html=rates.map(function(r){
+    var res=val*Math.pow(1+r[1]/100,yr);
+    var gain=res-val;
+    return '<div class="row" style="padding:6px 10px;border-radius:10px;background:#F8F9FB;justify-content:space-between">'
+      +'<span style="font-size:12px;font-weight:600">'+r[0]+'</span>'
+      +'<div class="col" style="align-items:flex-end">'
+      +'<span style="font-size:13px;font-weight:800;color:'+r[2]+'">'+fmt(res)+'</span>'
+      +'<span style="font-size:10px;color:#1DB954">+'+fmt(gain)+'</span>'
+      +'</div></div>';
+  }).join('');
+  el.innerHTML=html;
 };
 
 /* ══ MENU ══ */
@@ -745,7 +898,9 @@ SCR.metas=()=>`
 
 /* ══ CONTAS ══ */
 SCR.contas=()=>{
-  const total=S.accounts.reduce((s,a)=>s+(+a.balance||0),0);
+  const total=S.accounts.reduce((s,a)=>s+(+a.balance||0),0)
+    + S.transactions.filter(t=>t.type==='receita').reduce((s,t)=>s+(+t.amount||0),0)
+    - S.transactions.filter(t=>t.type==='despesa').reduce((s,t)=>s+(+t.amount||0),0);
   return`
   <div class="hdr"><button class="back" onclick="back()">←</button><h1>Contas</h1><button class="icon-btn" onclick="openAddAccount()">＋</button></div>
   <div style="padding:12px 16px 80px">
