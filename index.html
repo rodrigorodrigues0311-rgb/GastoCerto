@@ -1232,7 +1232,7 @@ function updateFbUI(state){
     box.style.cssText='display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#E8F5E9;border:1px solid #86EFAC;font-size:10px;font-weight:700;color:#16A34A;flex-shrink:0';
     dot.style.background='#1DB954'; dot.style.animation='none';
     txt.textContent='✓ Salvo';
-    setTimeout(function(){updateFbUI('idle');},3000);
+    // stay green — don't hide
   } else if(state==='syncing'){
     box.style.cssText='display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#FFF7ED;border:1px solid #FED7AA;font-size:10px;font-weight:700;color:#C2410C;flex-shrink:0';
     dot.style.background='#F4A261'; dot.style.animation='fbp .6s ease-in-out infinite alternate';
@@ -1242,10 +1242,10 @@ function updateFbUI(state){
     dot.style.background='#E63946'; dot.style.animation='none';
     txt.textContent='✗ Erro';
   } else {
-    // idle — connected
-    box.style.cssText='display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#EEF2FF;border:1px solid #C7D2FE;font-size:10px;font-weight:700;color:#4F46E5;flex-shrink:0';
-    dot.style.background='#818CF8'; dot.style.animation='none';
-    txt.textContent='☁';
+    // idle — show as green connected
+    box.style.cssText='display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#E8F5E9;border:1px solid #86EFAC;font-size:10px;font-weight:700;color:#16A34A;flex-shrink:0';
+    dot.style.background='#1DB954'; dot.style.animation='none';
+    txt.textContent='☁ OK';
   }
   window._fbLastState=state;
 }
