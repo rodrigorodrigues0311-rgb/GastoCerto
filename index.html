@@ -185,16 +185,17 @@ body.pwa-installed #ios-banner { display: none !important; }
 
 /* Firebase sync indicator */
 #sync-dot {
-  width: 8px; height: 8px; border-radius: 50%;
-  background: #1DB954;
-  position: fixed; bottom: 72px; right: 8px;
-  z-index: 200; box-shadow: 0 0 6px rgba(29,185,84,.6);
-  transition: background .3s;
+  width: 10px; height: 10px; border-radius: 50%;
+  background: #8892A4; /* grey = not yet connected */
+  position: absolute; bottom: 80px; right: 12px;
+  z-index: 200; box-shadow: 0 0 6px rgba(0,0,0,.3);
+  transition: background .4s;
+  cursor: pointer;
 }
-#sync-dot.syncing { background: #F4A261; animation: syncPulse .8s ease-in-out infinite alternate; }
-#sync-dot.error   { background: #E63946; }
-#sync-dot.offline { background: #8892A4; }
-@keyframes syncPulse { from{opacity:.5} to{opacity:1} }
+#sync-dot.ok      { background: #1DB954; box-shadow: 0 0 8px rgba(29,185,84,.7); }
+#sync-dot.syncing { background: #F4A261; animation: syncPulse .7s ease-in-out infinite alternate; }
+#sync-dot.error   { background: #E63946; box-shadow: 0 0 8px rgba(230,57,70,.7); }
+@keyframes syncPulse { from{opacity:.4;transform:scale(.8)} to{opacity:1;transform:scale(1.2)} }
 
 </style>
 
@@ -224,46 +225,84 @@ body.pwa-installed #ios-banner { display: none !important; }
   // Expose globally so the rest of the app can use
   window._fb = { db, auth, doc, getDoc, setDoc, onSnapshot };
 
-  // ── Sign in anonymously (each device gets a unique UID) ──
-  signInAnonymously(auth).catch(e => console.warn('[Firebase] auth error:', e));
-
   onAuthStateChanged(auth, async user => {
-    if (!user) return;
+    const dot = document.getElementById('sync-dot');
+    if (!user) {
+      if (dot) { dot.className = 'error'; dot.title = 'Não autenticado'; }
+      return;
+    }
     window._fbUid = user.uid;
+    if (dot) { dot.className = 'syncing'; dot.title = 'Carregando dados...'; }
     console.log('[Firebase] UID:', user.uid);
 
-    // ── Load data from Firestore ──
     const ref = doc(db, 'users', user.uid);
     try {
       const snap = await getDoc(ref);
       if (snap.exists()) {
-        const cloud = snap.data();
-        // Merge cloud data into STATE
-        window._mergeFromCloud(cloud);
-        console.log('[Firebase] Data loaded from cloud ✅');
+        window._mergeFromCloud(snap.data());
+        if (typeof render === 'function') render();
+        console.log('[Firebase] Data loaded ✅');
       } else {
-        // First time — push local data to cloud
         await window._pushToCloud();
-        console.log('[Firebase] First sync — data pushed to cloud ✅');
+        console.log('[Firebase] First push ✅');
       }
+      if (dot) { dot.className = ''; dot.title = 'Sincronizado ✅'; }
     } catch(e) {
-      console.warn('[Firebase] load error:', e);
+      console.warn('[Firebase] load error:', e.code, e.message);
+      if (dot) { dot.className = 'error'; dot.title = 'Erro: ' + e.message; }
+      window._showFbError && window._showFbError(e.code || e.message);
     }
 
-    // ── Real-time listener — sync changes from other devices ──
-    onSnapshot(ref, snap => {
-      if (snap.exists() && !window._fbWriting) {
-        window._mergeFromCloud(snap.data());
-        render();
+    onSnapshot(ref,
+      snap => {
+        if (snap.exists() && !window._fbWriting) {
+          window._mergeFromCloud(snap.data());
+          if (typeof render === 'function') render();
+        }
+        if (dot) { dot.className = ''; dot.title = 'Sincronizado ✅'; }
+      },
+      err => {
+        console.warn('[Firebase] snapshot error:', err.code);
+        if (dot) { dot.className = 'error'; dot.title = 'Erro sync: ' + err.code; }
       }
-    });
+    );
   });
+
+  signInAnonymously(auth).catch(e => {
+    console.error('[Firebase] signIn error:', e.code, e.message);
+    const dot = document.getElementById('sync-dot');
+    if (dot) { dot.className = 'error'; dot.title = 'Erro auth: ' + e.code; }
+    // Show visible error toast
+    window._showFbError('Auth: ' + (e.code || e.message));
+  });
+
+  window._showFbError = function(msg) {
+    let toast = document.getElementById('fb-toast');
+    if (!toast) {
+      toast = document.createElement('div');
+      toast.id = 'fb-toast';
+      toast.style.cssText = [
+        'position:fixed','bottom:85px','left:50%',
+        'transform:translateX(-50%)',
+        'background:#E63946','color:#fff',
+        'padding:8px 16px','border-radius:10px',
+        'font-size:12px','font-family:Inter,sans-serif',
+        'z-index:9000','max-width:320px','text-align:center',
+        'box-shadow:0 4px 16px rgba(0,0,0,.4)'
+      ].join(';');
+      document.body.appendChild(toast);
+    }
+    toast.textContent = '🔴 Firebase: ' + msg;
+    toast.style.display = 'block';
+    // Auto hide after 10s
+    clearTimeout(toast._t);
+    toast._t = setTimeout(() => toast.style.display = 'none', 10000);
+  };
 </script>
 </head>
 <body>
 
 <!-- SPLASH -->
-<div id="sync-dot" title="Sincronização"></div>
 <div id="splash">
   <div id="sp-grid"></div>
   <div class="sg" id="sg1"></div><div class="sg" id="sg2"></div>
@@ -326,6 +365,7 @@ body.pwa-installed #ios-banner { display: none !important; }
       <span id="clock">9:41</span>
       <div class="row gap8" style="font-size:13px"><span>▲▲▲</span><span>📶</span><span>🔋</span></div>
     </div>
+    <div id="sync-dot" title="Sincronização com Firebase"></div>
     <div id="screen"></div>
     <nav id="bnav">
       <button class="nb on" data-s="dashboard"><span class="nb-i">🏠</span><span>Início</span></button>
@@ -399,7 +439,7 @@ window._pushToCloud = async function() {
       updatedAt:    new Date().toISOString()
     });
   const dot2 = document.getElementById('sync-dot');
-  if (dot2) dot2.className = '';
+  if (dot2) { dot2.className = 'ok'; dot2.title = 'Salvo na nuvem ✅'; }
   } catch(e) {
     console.warn('[Firebase] push error:', e);
     const dot3 = document.getElementById('sync-dot');
@@ -412,6 +452,9 @@ window._pushToCloud = async function() {
 function saveS(){
   saveLocal();
   window._pushToCloud();
+  // Update dot to syncing
+  const d = document.getElementById('sync-dot');
+  if (d) { d.className = 'syncing'; d.title = 'Salvando...'; }
 }
 
 // ── loadS: load from local cache (cloud loads async via onAuthStateChanged) ──
@@ -555,6 +598,17 @@ function render(){
   $('screen').innerHTML=screenFn();
   $('screen').scrollTop=0;
   document.querySelectorAll('.nb').forEach(b=>b.classList.toggle('on',b.dataset.s===curNav&&!curSc));
+  // Update Firebase status in config screen if visible
+  const fbDot = document.getElementById('fb-status-dot');
+  const fbTxt = document.getElementById('fb-status-txt');
+  const syncDot = document.getElementById('sync-dot');
+  if (fbDot && fbTxt && syncDot) {
+    fbDot.style.background = syncDot.style.background ||
+      (syncDot.className === 'ok' ? '#1DB954' :
+       syncDot.className === 'syncing' ? '#F4A261' :
+       syncDot.className === 'error' ? '#E63946' : '#8892A4');
+    fbTxt.textContent = syncDot.title || 'Verificando...';
+  }
 }
 
 // Seed initial history
@@ -1102,6 +1156,17 @@ window.savePerfil=function(){
 /* ══ CONFIG ══ */
 SCR.config=()=>`
   <div class="hdr"><button class="back" onclick="back()">←</button><h1>Configurações</h1></div>
+  <div class="col gap12 p16" style="padding-bottom:4px">
+    <div class="card" id="fb-status-card">
+      <div class="row gap10">
+        <div id="fb-status-dot" style="width:12px;height:12px;border-radius:50%;background:#8892A4;flex-shrink:0"></div>
+        <div class="f1">
+          <div style="font-weight:700;font-size:13px">Firebase / Nuvem</div>
+          <div style="font-size:12px;color:var(--muted)" id="fb-status-txt">Verificando conexão...</div>
+        </div>
+      </div>
+    </div>
+  </div>
   <div class="col gap12 p16" style="padding-bottom:24px">
     <div class="card" style="border:1px solid #FFE0E0">
       <div style="font-weight:700;font-size:13px;margin-bottom:6px;color:var(--R)">⚠️ Zona de perigo</div>
