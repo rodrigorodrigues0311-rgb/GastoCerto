@@ -170,24 +170,16 @@ img{display:block}
 .cbox{background:#fff;border-radius:20px;padding:24px;width:100%;max-width:300px;box-shadow:0 20px 60px rgba(0,0,0,.3);transform:scale(.9);transition:transform .25s;text-align:center}
 .cov.show .cbox{transform:scale(1)}
 
-#sync-dot{
-  position:fixed;bottom:76px;right:16px;
-  width:12px;height:12px;border-radius:50%;
-  background:#888;z-index:10000;
-  transition:background .4s;cursor:pointer;
-  box-shadow:0 2px 6px rgba(0,0,0,.4);
-  display:block !important;
-}
-#sync-dot.ok     {background:#1DB954;box-shadow:0 0 8px rgba(29,185,84,.9)}
-#sync-dot.syncing{background:#F4A261;animation:sp .6s ease-in-out infinite alternate}
-#sync-dot.error  {background:#E63946;box-shadow:0 0 8px rgba(230,57,70,.9)}
-@keyframes sp{from{opacity:.3;transform:scale(.7)}to{opacity:1;transform:scale(1.5)}}
+/* sync-dot hidden */
+#sync-dot{display:none !important}
+#fb-pill{display:none !important}
+
+@keyframes fbpulse{from{opacity:.3;transform:scale(.7)}to{opacity:1;transform:scale(1.4)}}
 </style>
 </head>
 <body>
 
 <!-- SPLASH -->
-<div id="sync-dot" title="Firebase"></div>
 <div id="splash">
   <div id="sp-grid"></div>
   <div class="sg" id="sg1"></div><div class="sg" id="sg2"></div>
@@ -425,6 +417,8 @@ function render(){
   $('screen').innerHTML=screenFn();
   $('screen').scrollTop=0;
   document.querySelectorAll('.nb').forEach(b=>b.classList.toggle('on',b.dataset.s===curNav&&!curSc));
+  // Re-apply Firebase status after render (elements are recreated)
+  if(typeof applyDot==='function') applyDot();
 }
 
 // Seed initial history
@@ -496,6 +490,10 @@ SCR.dashboard=()=>{
   <div style="background:#fff;padding:12px 16px 10px;display:flex;align-items:center;gap:10px;border-bottom:1px solid var(--border);position:sticky;top:0;z-index:40">
     <button onclick="go('menu')" style="font-size:22px;color:var(--P);padding:0;line-height:1">☰</button>
     <div class="f1" style="display:flex;align-items:center;justify-content:center">${LOGO_HTML}</div>
+    <div id="fb-status-inline" style="display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#f0f0f0;font-size:10px;font-weight:600;color:#888">
+      <div id="fb-status-dot-inline" style="width:7px;height:7px;border-radius:50%;background:#ccc;flex-shrink:0"></div>
+      <span id="fb-status-txt-inline">...</span>
+    </div>
     <button onclick="go('notif')" style="font-size:20px;padding:0;color:var(--muted);line-height:1">🔔</button>
     <button onclick="go('perfil')" style="width:34px;height:34px;border-radius:50%;overflow:hidden;border:2px solid var(--P);flex-shrink:0;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:0">
       ${photo?`<img src="${photo}" style="width:100%;height:100%;object-fit:cover">`:`<span style="font-size:16px">👤</span>`}
@@ -1334,13 +1332,44 @@ render();
 var CFG={apiKey:"AIzaSyCA4z_LJhQ1ZK-YAZgjnYfxKrjZx8iz-G8",authDomain:"gastocerto-7da6d.firebaseapp.com",projectId:"gastocerto-7da6d",storageBucket:"gastocerto-7da6d.firebasestorage.app",messagingSenderId:"264328179853",appId:"1:264328179853:web:5f8deb2cc373f85149b2c4"};
 firebase.apps.length?firebase.app():firebase.initializeApp(CFG);
 var db=firebase.firestore(),auth=firebase.auth();
-function dot(c,t){var e=document.getElementById('sync-dot');if(e){e.className=c||'';e.title=t||'';}}
+// Store last Firebase state globally
+window._fbState = {c:'', t:'...'};
+
+function dot(c,t){
+  window._fbState = {c:c, t:t||'...'};
+  applyDot();
+  if(c==='ok'){
+    clearTimeout(window._fbOkTimer);
+    window._fbOkTimer = setTimeout(function(){
+      window._fbState = {c:'idle', t:'Nuvem'};
+      applyDot();
+    }, 3000);
+  }
+}
+
+function applyDot(){
+  var c = window._fbState.c;
+  var t = window._fbState.t;
+  var idot = document.getElementById('fb-status-dot-inline');
+  var itxt = document.getElementById('fb-status-txt-inline');
+  var ibox = document.getElementById('fb-status-inline');
+  if(!idot||!itxt||!ibox) return;
+  var color  = c==='ok'?'#1DB954' : c==='syncing'?'#F4A261' : c==='error'?'#E63946' : '#ccc';
+  var bg     = c==='ok'?'#E8F5E9' : c==='syncing'?'#FFF3E0' : c==='error'?'#FFF0F1' : '#f0f0f0';
+  var tcolor = c==='ok'?'#1DB954' : c==='syncing'?'#c45000' : c==='error'?'#E63946' : '#888';
+  var label  = c==='ok'?'Salvo'   : c==='syncing'?'Sincron.' : c==='error'?'Erro'    : t||'...';
+  idot.style.background = color;
+  ibox.style.background = bg;
+  itxt.style.color      = tcolor;
+  itxt.textContent      = label;
+  // pulse animation for syncing
+  idot.style.animation = c==='syncing' ? 'fbpulse .6s ease-in-out infinite alternate' : 'none';
+}
 function toast(m){var e=document.getElementById('fb-toast');if(!e){e=document.createElement('div');e.id='fb-toast';e.style.cssText='position:fixed;bottom:85px;left:50%;transform:translateX(-50%);background:#E63946;color:#fff;padding:10px 18px;border-radius:12px;font-size:13px;z-index:9999;max-width:300px;text-align:center;display:none;font-family:Inter,sans-serif';document.body.appendChild(e);}e.textContent=m;e.style.display='block';clearTimeout(e._t);e._t=setTimeout(function(){e.style.display='none';},8000);}
 window._fbWriting=false;
 window._pushToCloud=function(){if(!window._fbUid)return;dot('syncing','Salvando...');window._fbWriting=true;db.collection('users').doc(window._fbUid).set({user:S.user,accounts:S.accounts,transactions:S.transactions,budgets:S.budgets,goals:S.goals,cats:S.cats,updatedAt:new Date().toISOString()}).then(function(){dot('ok','Sincronizado');setTimeout(function(){window._fbWriting=false;},300);}).catch(function(e){dot('error',e.code);toast('Erro: '+(e.code||e.message));window._fbWriting=false;});};
 window._mergeFromCloud=function(d){if(!d||!S)return;if(d.user)S.user=d.user;if(d.accounts)S.accounts=d.accounts;if(d.transactions)S.transactions=d.transactions;if(d.budgets)S.budgets=d.budgets;if(d.goals)S.goals=d.goals;if(d.cats)S.cats=d.cats;saveLocal();};
-// Set dot visible immediately on load
-(function(){var d=document.getElementById('sync-dot');if(d){d.className='syncing';d.title='Conectando ao Firebase...';d.style.display='block';}})();
+// Firebase connecting...
 auth.signInAnonymously().catch(function(e){dot('error',e.code);toast('Auth: '+(e.code||e.message));});
 auth.onAuthStateChanged(function(user){
   if(!user){dot('error','Sem auth');return;}
