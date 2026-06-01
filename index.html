@@ -182,12 +182,88 @@ img{display:block}
 body.pwa-installed #ibanner,
 body.pwa-installed #ios-banner { display: none !important; }
 
+
+/* Firebase sync indicator */
+#sync-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: #1DB954;
+  position: fixed; bottom: 72px; right: 8px;
+  z-index: 200; box-shadow: 0 0 6px rgba(29,185,84,.6);
+  transition: background .3s;
+}
+#sync-dot.syncing { background: #F4A261; animation: syncPulse .8s ease-in-out infinite alternate; }
+#sync-dot.error   { background: #E63946; }
+#sync-dot.offline { background: #8892A4; }
+@keyframes syncPulse { from{opacity:.5} to{opacity:1} }
+
 </style>
 
+
+<!-- Firebase SDKs -->
+<script type="module">
+  import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js';
+  import { getFirestore, doc, getDoc, setDoc, onSnapshot }
+    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js';
+  import { getAuth, signInAnonymously, onAuthStateChanged }
+    from 'https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js';
+
+  // ── Firebase config — substitua pelos seus dados ──
+  const firebaseConfig = {
+    apiKey:            "AIzaSyCA4z_LJhQ1ZK-YAZgjnYfxKrjZx8iz-G8",
+    authDomain:        "gastocerto-7da6d.firebaseapp.com",
+    projectId:         "gastocerto-7da6d",
+    storageBucket:     "gastocerto-7da6d.firebasestorage.app",
+    messagingSenderId: "264328179853",
+    appId:             "1:264328179853:web:5f8deb2cc373f85149b2c4"
+  };
+
+  const app  = initializeApp(firebaseConfig);
+  const db   = getFirestore(app);
+  const auth = getAuth(app);
+
+  // Expose globally so the rest of the app can use
+  window._fb = { db, auth, doc, getDoc, setDoc, onSnapshot };
+
+  // ── Sign in anonymously (each device gets a unique UID) ──
+  signInAnonymously(auth).catch(e => console.warn('[Firebase] auth error:', e));
+
+  onAuthStateChanged(auth, async user => {
+    if (!user) return;
+    window._fbUid = user.uid;
+    console.log('[Firebase] UID:', user.uid);
+
+    // ── Load data from Firestore ──
+    const ref = doc(db, 'users', user.uid);
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const cloud = snap.data();
+        // Merge cloud data into STATE
+        window._mergeFromCloud(cloud);
+        console.log('[Firebase] Data loaded from cloud ✅');
+      } else {
+        // First time — push local data to cloud
+        await window._pushToCloud();
+        console.log('[Firebase] First sync — data pushed to cloud ✅');
+      }
+    } catch(e) {
+      console.warn('[Firebase] load error:', e);
+    }
+
+    // ── Real-time listener — sync changes from other devices ──
+    onSnapshot(ref, snap => {
+      if (snap.exists() && !window._fbWriting) {
+        window._mergeFromCloud(snap.data());
+        render();
+      }
+    });
+  });
+</script>
 </head>
 <body>
 
 <!-- SPLASH -->
+<div id="sync-dot" title="Sincronização"></div>
 <div id="splash">
   <div id="sp-grid"></div>
   <div class="sg" id="sg1"></div><div class="sg" id="sg2"></div>
@@ -280,13 +356,67 @@ const LOGO_HTML=`<img src="${LOGO_SRC}" style="height:27px;border-radius:4px" al
    STATE  — persisted localStorage
 ══════════════════════════════════════ */
 const STORE_KEY='gc_v4';
-function loadS(){
+
+// ── LOCAL storage (fallback/cache) ──
+function loadLocal(){
   try{const d=localStorage.getItem(STORE_KEY);return d?JSON.parse(d):null;}
   catch(e){return null;}
 }
-function saveS(){
+function saveLocal(){
   try{localStorage.setItem(STORE_KEY,JSON.stringify(S));}
-  catch(e){console.warn('save error',e);}
+  catch(e){}
+}
+
+// ── CLOUD sync ──
+window._fbWriting = false;
+
+window._mergeFromCloud = function(cloud) {
+  if (!cloud) return;
+  // Only merge if cloud data is newer or has more entries
+  if (cloud.user)         S.user         = cloud.user;
+  if (cloud.accounts)     S.accounts     = cloud.accounts;
+  if (cloud.transactions) S.transactions = cloud.transactions;
+  if (cloud.budgets)      S.budgets      = cloud.budgets;
+  if (cloud.goals)        S.goals        = cloud.goals;
+  if (cloud.cats)         S.cats         = cloud.cats;
+  saveLocal(); // keep local cache in sync
+};
+
+window._pushToCloud = async function() {
+  if (!window._fb || !window._fbUid) return;
+  window._fbWriting = true;
+  const dot = document.getElementById('sync-dot');
+  if (dot) dot.className = 'syncing';
+  try {
+    const {db, doc, setDoc} = window._fb;
+    await setDoc(doc(db, 'users', window._fbUid), {
+      user:         S.user,
+      accounts:     S.accounts,
+      transactions: S.transactions,
+      budgets:      S.budgets,
+      goals:        S.goals,
+      cats:         S.cats,
+      updatedAt:    new Date().toISOString()
+    });
+  const dot2 = document.getElementById('sync-dot');
+  if (dot2) dot2.className = '';
+  } catch(e) {
+    console.warn('[Firebase] push error:', e);
+    const dot3 = document.getElementById('sync-dot');
+    if (dot3) dot3.className = 'error';
+  }
+  setTimeout(() => { window._fbWriting = false; }, 500);
+};
+
+// ── saveS: save locally AND push to cloud ──
+function saveS(){
+  saveLocal();
+  window._pushToCloud();
+}
+
+// ── loadS: load from local cache (cloud loads async via onAuthStateChanged) ──
+function loadS(){
+  return loadLocal();
 }
 const DEF={
   user:{name:'Usuário',email:'',phone:'',occupation:'',photo:null},
