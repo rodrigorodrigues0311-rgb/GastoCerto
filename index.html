@@ -170,17 +170,23 @@ img{display:block}
 .cbox{background:#fff;border-radius:20px;padding:24px;width:100%;max-width:300px;box-shadow:0 20px 60px rgba(0,0,0,.3);transform:scale(.9);transition:transform .25s;text-align:center}
 .cov.show .cbox{transform:scale(1)}
 
-#sync-dot{position:absolute;bottom:82px;right:12px;width:10px;height:10px;
-  border-radius:50%;background:#ccc;z-index:200;transition:background .4s;cursor:pointer}
-#sync-dot.ok     {background:#1DB954;box-shadow:0 0 6px rgba(29,185,84,.7)}
-#sync-dot.syncing{background:#F4A261;animation:sp .7s ease-in-out infinite alternate}
-#sync-dot.error  {background:#E63946;box-shadow:0 0 6px rgba(230,57,70,.7)}
-@keyframes sp{from{opacity:.4;transform:scale(.8)}to{opacity:1;transform:scale(1.3)}}
+#sync-dot{
+  position:fixed;bottom:72px;right:20px;
+  width:12px;height:12px;border-radius:50%;
+  background:#aaa;z-index:500;
+  transition:background .4s;cursor:pointer;
+  box-shadow:0 1px 4px rgba(0,0,0,.3);
+}
+#sync-dot.ok     {background:#1DB954;box-shadow:0 0 8px rgba(29,185,84,.8)}
+#sync-dot.syncing{background:#F4A261;animation:sp .6s ease-in-out infinite alternate}
+#sync-dot.error  {background:#E63946;box-shadow:0 0 8px rgba(230,57,70,.8)}
+@keyframes sp{from{opacity:.3;transform:scale(.7)}to{opacity:1;transform:scale(1.4)}}
 </style>
 </head>
 <body>
 
 <!-- SPLASH -->
+<div id="sync-dot" title="Firebase"></div>
 <div id="splash">
   <div id="sp-grid"></div>
   <div class="sg" id="sg1"></div><div class="sg" id="sg2"></div>
@@ -243,7 +249,6 @@ img{display:block}
       <span id="clock">9:41</span>
       <div class="row gap8" style="font-size:13px"><span>▲▲▲</span><span>📶</span><span>🔋</span></div>
     </div>
-    <div id="sync-dot" title="Firebase"></div>
     <div id="screen"></div>
     <nav id="bnav">
       <button class="nb on" data-s="dashboard"><span class="nb-i">🏠</span><span>Início</span></button>
@@ -1333,7 +1338,8 @@ function toast(m){var e=document.getElementById('fb-toast');if(!e){e=document.cr
 window._fbWriting=false;
 window._pushToCloud=function(){if(!window._fbUid)return;dot('syncing','Salvando...');window._fbWriting=true;db.collection('users').doc(window._fbUid).set({user:S.user,accounts:S.accounts,transactions:S.transactions,budgets:S.budgets,goals:S.goals,cats:S.cats,updatedAt:new Date().toISOString()}).then(function(){dot('ok','Sincronizado');setTimeout(function(){window._fbWriting=false;},300);}).catch(function(e){dot('error',e.code);toast('Erro: '+(e.code||e.message));window._fbWriting=false;});};
 window._mergeFromCloud=function(d){if(!d||!S)return;if(d.user)S.user=d.user;if(d.accounts)S.accounts=d.accounts;if(d.transactions)S.transactions=d.transactions;if(d.budgets)S.budgets=d.budgets;if(d.goals)S.goals=d.goals;if(d.cats)S.cats=d.cats;saveLocal();};
-dot('syncing','Conectando...');
+// Set dot visible immediately on load
+(function(){var d=document.getElementById('sync-dot');if(d){d.className='syncing';d.title='Conectando ao Firebase...';d.style.display='block';}})();
 auth.signInAnonymously().catch(function(e){dot('error',e.code);toast('Auth: '+(e.code||e.message));});
 auth.onAuthStateChanged(function(user){
   if(!user){dot('error','Sem auth');return;}
