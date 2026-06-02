@@ -1814,9 +1814,11 @@ render();
       }).then(function(){updateFbUI('ok');})
         .catch(function(e){updateFbUI('error');throw e;});
     },
-    merge:function(d){
+    merge:function(d, keepUser){
       if(!d)return;
-      if(d.user)S.user=d.user;
+      // keepUser=true: loading OWN data (safe to overwrite user profile)
+      // keepUser=false/undefined: loading PARTNER data (never overwrite own profile)
+      if(d.user && keepUser) S.user=d.user;
       if(d.accounts)S.accounts=d.accounts;
       if(d.transactions)S.transactions=d.transactions;
       if(d.budgets)S.budgets=d.budgets;
@@ -1835,13 +1837,13 @@ render();
     updateFbUI('syncing');
     var ref=db.collection('users').doc(user.uid);
     ref.get().then(function(snap){
-      if(snap.exists){window.FB.merge(snap.data());render();}
+      if(snap.exists){window.FB.merge(snap.data(), true);render();}
       else{window.FB.push();}
       updateFbUI('idle');
     }).catch(function(e){updateFbUI('error');console.error('[FB] load',e.code);});
 
     ref.onSnapshot(function(snap){
-      if(snap.exists&&!window._fbLock){window.FB.merge(snap.data());render();updateFbUI('idle');}
+      if(snap.exists&&!window._fbLock){window.FB.merge(snap.data(),true);render();updateFbUI('idle');}
     },function(e){updateFbUI('error');});
 
     // Couple sync
@@ -1862,22 +1864,38 @@ render();
             var newTxs=(pData.transactions||[]).filter(function(t){return!myIds.has(t.id);});
             if(newTxs.length){
               window._fbLock=true;
-              window.FB.merge(pData);
+              // NEVER overwrite own profile — pass false to merge
+              window.FB.merge(pData, false);
               if(!S.notifications)S.notifications=[];
+
+              // New transactions
               newTxs.forEach(function(t){
                 var emoji=t.type==='receita'?'💰':t.type==='despesa'?'💸':'📌';
-              var action=t.type==='receita'?'adicionou uma receita':'adicionou uma despesa';
-              S.notifications.push({
-                id:t.id+'_n',
-                icon:emoji,
-                msg:pName+' '+action+': '+t.desc+' (R$ '+(+t.amount).toFixed(2).replace('.',',')+') em '+t.date,
-                from:pName,date:new Date().toLocaleDateString('pt-BR'),read:false
+                var action=t.type==='receita'?'adicionou uma receita':'adicionou uma despesa';
+                S.notifications.push({id:t.id+'_n',icon:emoji,
+                  msg:pName+' '+action+': '+t.desc+' (R$ '+(+t.amount).toFixed(2).replace('.',',')+') em '+t.date,
+                  from:pName,date:new Date().toLocaleDateString('pt-BR'),read:false});
               });
+
+              // New accounts
+              var myAccIds=new Set((S.accounts||[]).map(function(a){return a.id;}));
+              (pData.accounts||[]).filter(function(a){return!myAccIds.has(a.id);}).forEach(function(a){
+                S.notifications.push({id:a.id+'_n',icon:'🏦',
+                  msg:pName+' adicionou a conta: '+a.name,
+                  from:pName,date:new Date().toLocaleDateString('pt-BR'),read:false});
               });
+
+              // New goals
+              var myGoalIds=new Set((S.goals||[]).map(function(g){return g.id;}));
+              (pData.goals||[]).filter(function(g){return!myGoalIds.has(g.id);}).forEach(function(g){
+                S.notifications.push({id:g.id+'_n',icon:'🎯',
+                  msg:pName+' criou uma meta: '+g.name+' (alvo: '+fmt(+g.target||0)+')',
+                  from:pName,date:new Date().toLocaleDateString('pt-BR'),read:false});
+              });
+
               saveLocal();
               render();
               window._fbLock=false;
-            }
           });
         });
       });
