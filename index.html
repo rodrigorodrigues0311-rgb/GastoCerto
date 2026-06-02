@@ -169,6 +169,12 @@ img{display:block}
 .cbox{background:#fff;border-radius:20px;padding:24px;width:100%;max-width:300px;box-shadow:0 20px 60px rgba(0,0,0,.3);transform:scale(.9);transition:transform .25s;text-align:center}
 .cov.show .cbox{transform:scale(1)}
 @keyframes fbp{from{opacity:.3;transform:scale(.7)}to{opacity:1;transform:scale(1.4)}}
+
+/* Negative amount toggle */
+.ai-wrap{position:relative;display:flex;align-items:center;gap:6px}
+.ai-wrap .ai{flex:1}
+.neg-btn{width:40px;height:52px;border-radius:12px;border:1.5px solid var(--border);background:#fff;font-size:22px;font-weight:700;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
+.neg-btn.active{border-color:var(--R);background:#FFF0F1;color:var(--R)}
 </style>
 </head>
 <body>
@@ -274,6 +280,21 @@ function saveLocal(){
   try{localStorage.setItem(STORE_KEY,JSON.stringify(S));}
   catch(e){}
 }
+
+// Calculate real balance for an account (initial + linked transactions)
+function accBal(accId){
+  var acc=S.accounts.find(function(a){return a.id===accId;});
+  if(!acc)return 0;
+  var base=+acc.balance||0;
+  var txTotal=S.transactions.filter(function(t){return t.accountId===accId;})
+    .reduce(function(s,t){return s+(t.type==='receita'?+t.amount:-+t.amount);},0);
+  return base+txTotal;
+}
+
+// Total balance across all accounts
+function totalBal(){
+  return S.accounts.reduce(function(s,a){return s+accBal(a.id);},0);
+}
 function saveS(){
   saveLocal();
   if(window.FB&&window.FB.uid) window.FB.push();
@@ -296,7 +317,7 @@ if(!S.user)S.user={};
    HELPERS
 ══════════════════════════════════════ */
 const $=id=>document.getElementById(id);
-const fmt=n=>'R$\u00a0'+Math.abs(+n||0).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');
+const fmt=n=>{var v=+n||0;return'R$\u00a0'+Math.abs(v).toFixed(2).replace('.',',').replace(/\B(?=(\d{3})+(?!\d))/g,'.');};
 const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,6);
 const today=()=>new Date().toISOString().slice(0,10);
 const nowM=()=>new Date().toISOString().slice(0,7);
@@ -462,9 +483,7 @@ window.showConfirm=showConfirm;
 SCR.dashboard=()=>{
   const txs=txsM(nowM());
   const rec=sumT(txs,'receita'),desp=sumT(txs,'despesa'),res=rec-desp;
-  const bal=S.accounts.reduce((s,a)=>s+(+a.balance||0),0)
-    +S.transactions.filter(t=>t.type==='receita').reduce((s,t)=>s+(+t.amount||0),0)
-    -S.transactions.filter(t=>t.type==='despesa').reduce((s,t)=>s+(+t.amount||0),0);
+  const bal=typeof totalBal==='function'?totalBal():S.accounts.reduce((s,a)=>s+(+a.balance||0),0);
 
   const now=new Date();
   const prevM=`${now.getMonth()===0?now.getFullYear()-1:now.getFullYear()}-${String(now.getMonth()===0?12:now.getMonth()).padStart(2,'0')}`;
@@ -504,7 +523,7 @@ SCR.dashboard=()=>{
     <div class="card" onclick="go('contas')" style="background:linear-gradient(135deg,#0A2540,#1a3a60);color:#fff;border-radius:18px;position:relative;overflow:hidden;cursor:pointer">
       <div style="position:absolute;top:-20px;right:-20px;width:100px;height:100px;border-radius:50%;background:rgba(255,255,255,.05)"></div>
       <div style="font-size:11px;opacity:.65;margin-bottom:2px">Saldo total</div>
-      <div style="font-size:30px;font-weight:900;letter-spacing:-1px">${fmt(bal)}</div>
+      <div style="font-size:30px;font-weight:900;letter-spacing:-1px;color:${bal<0?'#FF6B6B':'#fff'}">${bal<0?'−':''}${fmt(bal)}</div>
       <div style="height:1px;background:rgba(255,255,255,.12);margin:10px 0"></div>
       <div class="row" style="gap:0;margin-bottom:${S.accounts.length?'10px':'0'}">
         <div style="flex:1;padding-right:12px;border-right:1px solid rgba(255,255,255,.15)">
@@ -516,7 +535,7 @@ SCR.dashboard=()=>{
           <div style="font-size:13px;font-weight:700">${S.transactions.length} no total</div>
         </div>
       </div>
-      ${S.accounts.length?`<div style="border-top:1px solid rgba(255,255,255,.1);padding-top:8px;display:flex;flex-direction:column;gap:4px">${S.accounts.map(a=>`<div class="row" style="justify-content:space-between"><div style="font-size:10px;opacity:.65;display:flex;align-items:center;gap:5px"><div style="width:6px;height:6px;border-radius:50%;background:${a.color||'#fff'}"></div>${a.name}</div><div style="font-size:10px;font-weight:700;opacity:.9">${fmt(+a.balance||0)}</div></div>`).join('')}</div>`:''}
+      ${S.accounts.length?`<div style="border-top:1px solid rgba(255,255,255,.1);padding-top:8px;display:flex;flex-direction:column;gap:4px">${S.accounts.map(a=>{const rb=accBal(a.id);return`<div class="row" style="justify-content:space-between"><div style="font-size:10px;opacity:.65;display:flex;align-items:center;gap:5px"><div style="width:6px;height:6px;border-radius:50%;background:${a.color||'#fff'}"></div>${a.name}</div><div style="font-size:10px;font-weight:700;color:${rb<0?'#FF6B6B':'rgba(255,255,255,.9)'}">${rb<0?'−':''}${fmt(rb)}</div></div>`;}).join('')}</div>`:''}
     </div>
     <div class="row gap8" style="margin-top:10px">
       <div class="kc" onclick="navTo('lancamentos');setTxF('receitas')" style="cursor:pointer">
@@ -768,8 +787,8 @@ SCR.contas=()=>{
   <div class="hdr"><button class="back" onclick="back()">←</button><h1>Contas</h1><button class="icon-btn" onclick="openAddAccount()">＋</button></div>
   <div style="padding:12px 16px 80px">
     ${S.accounts.length?`<div class="card mb12" style="background:linear-gradient(135deg,#0A2540,#1a3a60);color:#fff">
-      <div style="font-size:11px;opacity:.6">Saldo total</div>
-      <div style="font-size:26px;font-weight:800;margin-top:2px">${fmt(total)}</div>
+      <div style="font-size:11px;opacity:.6">Saldo total (real)</div>
+      <div style="font-size:26px;font-weight:800;margin-top:2px;color:${total<0?'#FF6B6B':'#fff'}">${total<0?'−':''}${fmt(total)}</div>
       <div style="font-size:12px;opacity:.5;margin-top:4px">${S.accounts.length} conta${S.accounts.length!==1?'s':''}</div>
     </div>`:``}
     ${S.accounts.length===0?`<div class="empty"><div class="empty-i">🏦</div><div class="empty-t">Nenhuma conta</div><div class="empty-s">Adicione bancos, carteiras e cartões</div>
@@ -778,7 +797,7 @@ SCR.contas=()=>{
     <div class="card mt10 row gap12" onclick="openAddAccount('${a.id}')">
       <div style="width:42px;height:42px;border-radius:13px;background:${a.color||'#0A2540'};display:flex;align-items:center;justify-content:center;font-size:20px;flex-shrink:0">🏦</div>
       <div class="f1"><div style="font-weight:700;font-size:14px">${a.name}</div><div style="font-size:11px;color:var(--muted)">${a.type}${a.bank?' • '+a.bank:''}</div></div>
-      <div style="font-weight:700;font-size:15px;color:${(+a.balance||0)>=0?'var(--text)':'var(--R)'}">${fmt(a.balance)}</div>
+      ${(()=>{const rb=accBal(a.id);return`<div class="col" style="align-items:flex-end"><div style="font-weight:700;font-size:15px;color:${rb<0?'var(--R)':'var(--text)'}">${rb<0?'−':''}${fmt(rb)}</div><div style="font-size:10px;color:var(--muted)">base: ${fmt(+a.balance||0)}</div></div>`;})()}
     </div>`).join('')}
   </div>
   <button class="fab" onclick="openAddAccount()">＋</button>`;
@@ -1117,7 +1136,11 @@ window.openAddTx=function(txId){
     </div>
     <input type="hidden" id="tx-type" value="${typ}">
     <input type="hidden" id="tx-id" value="${txId||''}">
-    <div class="fr"><label class="fl">Valor (R$)</label><input class="ai" id="tx-amount" type="number" step="0.01" min="0" placeholder="0,00" value="${tx?tx.amount:''}"></div>
+    <div class="fr"><label class="fl">Valor (R$) &nbsp;<span style="font-size:10px;color:var(--muted);font-weight:400">toque em − para valor negativo</span></label>
+    <div class="ai-wrap">
+      <input class="ai" id="tx-amount" type="number" step="0.01" placeholder="0,00" value="${tx?Math.abs(+tx.amount||0):''}">
+      <button type="button" id="tx-neg-btn" class="neg-btn${tx&&+tx.amount<0?' active':''}" onclick="toggleNeg('tx-amount','tx-neg-btn')">−</button>
+    </div></div>
     <div class="fr"><label class="fl">Descrição</label><input class="fi" id="tx-desc" placeholder="Ex: Supermercado, Salário..." value="${tx?tx.desc.replace(/"/g,'&quot;'):''}"></div>
     <div class="fr"><label class="fl">Categoria</label>
       <select class="fs" id="tx-cat">
@@ -1138,7 +1161,7 @@ window.openAddTx=function(txId){
 };
 window.swT=function(type,btn){$('tx-type').value=type;document.querySelectorAll('.tb').forEach(b=>b.className='tb');btn.className='tb o'+(type==='despesa'?'R':type==='receita'?'G':'T');};
 window.saveTx=function(){
-  const amt=parseFloat($('tx-amount').value);if(!amt||amt<=0){alert('Informe um valor válido.');return;}
+  const rawAmt=parseFloat($('tx-amount').value)||0;const neg=document.getElementById('tx-neg-btn')&&document.getElementById('tx-neg-btn').classList.contains('active');const amt=neg?-Math.abs(rawAmt):Math.abs(rawAmt);if(!rawAmt){alert('Informe um valor válido.');return;}
   const desc=$('tx-desc').value.trim();if(!desc){alert('Informe uma descrição.');return;}
   const cat=$('tx-cat').value;if(!cat){alert('Selecione uma categoria.');return;}
   const date=$('tx-date').value;if(!date){alert('Informe a data.');return;}
@@ -1167,7 +1190,11 @@ window.openAddAccount=function(accId){
       <select class="fs" id="ac-type">${['Conta corrente','Conta poupança','Carteira digital','Cartão de crédito','Dinheiro','Investimento'].map(tp=>`<option${a&&a.type===tp?' selected':''}>${tp}</option>`).join('')}</select>
     </div>
     <div class="fr"><label class="fl">Banco / Instituição</label><input class="fi" id="ac-bank" placeholder="Ex: Nubank, XP..." value="${a?a.bank||'':''}"></div>
-    <div class="fr"><label class="fl">Saldo inicial (R$)</label><input class="fi" id="ac-bal" type="number" step="0.01" placeholder="0,00" value="${a?a.balance:'0'}"></div>
+    <div class="fr"><label class="fl">Saldo inicial (R$)</label>
+    <div class="ai-wrap">
+      <input class="fi" id="ac-bal" type="number" step="0.01" placeholder="0,00" value="${a?Math.abs(+a.balance||0):'0'}" style="flex:1">
+      <button type="button" id="ac-neg-btn" class="neg-btn${a&&+a.balance<0?' active':''}" onclick="toggleNeg('ac-bal','ac-neg-btn')">−</button>
+    </div></div>
     <div class="fr"><label class="fl">Cor</label><div class="row gap8" style="flex-wrap:wrap">
       ${ACOLS.map(c=>`<button type="button" onclick="selColor('${c}',this)" data-color="${c}" style="width:32px;height:32px;border-radius:10px;background:${c};border:2px solid ${col===c?'#fff':'transparent'};box-shadow:${col===c?`0 0 0 2px ${c}`:'none'};cursor:pointer"></button>`).join('')}
     </div></div>
@@ -1190,7 +1217,7 @@ window.saveAcc=function(){
     name:name.trim(),
     type:($('ac-type')||{}).value||'Conta corrente',
     bank:(($('ac-bank')||{}).value||'').trim(),
-    balance:parseFloat(($('ac-bal')||{}).value)||0,
+    balance:(function(){var v=parseFloat(($('ac-bal')||{}).value)||0;var neg=document.getElementById('ac-neg-btn')&&document.getElementById('ac-neg-btn').classList.contains('active');return neg?-Math.abs(v):Math.abs(v);})(),
     color:($('ac-color')||{}).value||ACOLS[0]
   };
   if(id){
@@ -1227,7 +1254,7 @@ window.openAddBudget=function(id){
   <div class="fb">
     <input type="hidden" id="bd-id" value="${id||''}">
     <div class="fr"><label class="fl">Categoria</label><select class="fs" id="bd-cat"><option value="">Selecione...</option>${S.cats.despesa.map(c=>`<option value="${c}"${b&&b.category===c?' selected':''}>${c}</option>`).join('')}</select></div>
-    <div class="fr"><label class="fl">Limite (R$)</label><input class="ai" id="bd-limit" type="number" step="0.01" min="0" placeholder="0,00" value="${b?b.limit:''}"></div>
+    <div class="fr"><label class="fl">Limite (R$)</label><input class="ai" id="bd-limit" type="number" step="0.01" placeholder="0,00" value="${b?b.limit:''}"></div>
     <div class="fr"><label class="fl">Mês</label><input class="fi" id="bd-month" type="month" value="${b?b.month:_bM}"></div>
     <button class="bp" onclick="saveBud()">Salvar orçamento</button>
     ${b?`<button class="bd" onclick="delBud('${b.id}')">Excluir</button>`:''}
@@ -1259,8 +1286,8 @@ window.openAddGoal=function(id){
     <input type="hidden" id="gl-id" value="${id||''}"><input type="hidden" id="gl-icon" value="${g?g.icon:'🎯'}"><input type="hidden" id="gl-color" value="${col}">
     <div class="fr"><label class="fl">Nome</label><input class="fi" id="gl-name" placeholder="Ex: Viagem, Reserva..." value="${g?g.name.replace(/"/g,'&quot;'):''}"></div>
     <div class="fr"><label class="fl">Ícone</label><div style="display:flex;flex-wrap:wrap;gap:8px">${GICONS.map(ic=>`<button type="button" onclick="selGI('${ic}',this)" data-gi="${ic}" style="width:40px;height:40px;border-radius:12px;font-size:22px;border:2px solid ${g&&g.icon===ic?'var(--P)':'var(--border)'};cursor:pointer">${ic}</button>`).join('')}</div></div>
-    <div class="fr"><label class="fl">Valor alvo (R$)</label><input class="ai" id="gl-target" type="number" step="0.01" min="0" placeholder="0,00" value="${g?g.target:''}"></div>
-    <div class="fr"><label class="fl">Já guardado (R$)</label><input class="fi" id="gl-saved" type="number" step="0.01" min="0" placeholder="0,00" value="${g?g.saved:'0'}"></div>
+    <div class="fr"><label class="fl">Valor alvo (R$)</label><input class="ai" id="gl-target" type="number" step="0.01" placeholder="0,00" value="${g?g.target:''}"></div>
+    <div class="fr"><label class="fl">Já guardado (R$)</label><input class="fi" id="gl-saved" type="number" step="0.01" placeholder="0,00" value="${g?g.saved:'0'}"></div>
     <div class="fr"><label class="fl">Prazo</label><input class="fi" id="gl-dl" type="month" value="${g?g.deadline||'':''}"></div>
     <div class="fr"><label class="fl">Cor</label><div class="row gap8" style="flex-wrap:wrap">${ACOLS.map(c=>`<button type="button" onclick="selGC('${c}',this)" data-gc="${c}" style="width:32px;height:32px;border-radius:10px;background:${c};border:2px solid ${col===c?'#fff':'transparent'};box-shadow:${col===c?`0 0 0 2px ${c}`:'none'};cursor:pointer"></button>`).join('')}</div></div>
     <button class="bp" onclick="saveGoal()">Salvar meta</button>
@@ -1328,6 +1355,25 @@ $('bnav').addEventListener('click',e=>{
 function bellBadge(){var n=(S.notifications||[]).filter(function(x){return !x.read;}).length;return n>0?'<span style="position:absolute;top:-4px;right:-4px;background:#E63946;color:#fff;border-radius:50%;width:16px;height:16px;font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;border:1.5px solid #fff">'+n+'</span>':'';}
 window._fbLastState='idle';
 function updateFbUI(state){window._fbLastState=state;var box=document.getElementById('fb-status');var dot=document.getElementById('fb-dot');var txt=document.getElementById('fb-txt');if(!box||!dot||!txt)return;if(state==='ok'){box.style.cssText='display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#E8F5E9;border:1px solid #86EFAC;font-size:10px;font-weight:700;color:#16A34A;flex-shrink:0';dot.style.cssText='width:7px;height:7px;border-radius:50%;background:#1DB954;flex-shrink:0';txt.textContent='Salvo';}else if(state==='syncing'){box.style.cssText='display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#FFF7ED;border:1px solid #FED7AA;font-size:10px;font-weight:700;color:#C2410C;flex-shrink:0';dot.style.cssText='width:7px;height:7px;border-radius:50%;background:#F4A261;flex-shrink:0;animation:fbp .6s ease-in-out infinite alternate';txt.textContent='Sync';}else if(state==='error'){box.style.cssText='display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#FFF0F1;border:1px solid #FECACA;font-size:10px;font-weight:700;color:#DC2626;flex-shrink:0';dot.style.cssText='width:7px;height:7px;border-radius:50%;background:#E63946;flex-shrink:0';txt.textContent='Erro';}else{box.style.cssText='display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:99px;background:#E8F5E9;border:1px solid #86EFAC;font-size:10px;font-weight:700;color:#16A34A;flex-shrink:0';dot.style.cssText='width:7px;height:7px;border-radius:50%;background:#1DB954;flex-shrink:0';txt.textContent='OK';}}
+
+
+window.toggleNeg=function(inputId, btnId){
+  var inp=document.getElementById(inputId);
+  var btn=document.getElementById(btnId);
+  if(!inp||!btn)return;
+  btn.classList.toggle('active');
+  // If input already has a value, negate it
+  var val=parseFloat(inp.value)||0;
+  if(val!==0){inp.value=Math.abs(val);}
+};
+window.getSignedVal=function(inputId, btnId){
+  var inp=document.getElementById(inputId);
+  var btn=document.getElementById(btnId);
+  if(!inp)return 0;
+  var val=parseFloat(inp.value)||0;
+  var neg=btn&&btn.classList.contains('active');
+  return neg?-Math.abs(val):Math.abs(val);
+};
 
 render();
 
