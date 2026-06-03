@@ -629,7 +629,7 @@ SCR.dashboard=()=>{
     <div class="cl">
       ${recent.map(t=>`<div class="cr">
         <div style="width:34px;height:34px;border-radius:10px;background:${t.type==='receita'?'#E8F5E9':'#FFF0F1'};display:flex;align-items:center;justify-content:center;font-size:16px;margin-right:12px;flex-shrink:0">${CI[t.category]||'📦'}</div>
-        <div class="f1"><div style="font-weight:600;font-size:13px">${t.desc}</div><div style="font-size:11px;color:var(--muted)">${t.category} • ${t.date}</div></div>
+        <div class="f1"><div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:2px">${t.desc}${authorTag(t)}</div><div style="font-size:11px;color:var(--muted)">${t.category} • ${t.date}</div></div>
         <div style="font-weight:700;font-size:13px;color:${t.type==='receita'?'#1DB954':'#E63946'}">${t.type==='receita'?'+':'−'}${fmt(t.amount)}</div>
       </div>`).join('')}
     </div>`}
@@ -663,7 +663,7 @@ SCR.lancamentos=()=>{
     <div style="font-size:11px;color:var(--muted);font-weight:700;padding:14px 0 6px;text-transform:uppercase;letter-spacing:.8px">${d}</div>
     <div class="cl">${groups[d].map(t=>`<div class="cr" onclick="openAddTx('${t.id}')">
       <div style="width:34px;height:34px;border-radius:10px;background:${t.type==='receita'?'#E8F5E9':'#FFF0F1'};display:flex;align-items:center;justify-content:center;font-size:16px;margin-right:12px;flex-shrink:0">${CI[t.category]||'📦'}</div>
-      <div class="f1"><div style="font-weight:600;font-size:13px">${t.desc}</div><div style="font-size:11px;color:var(--muted)">${t.category}${t.accountId?' • '+(S.accounts.find(a=>a.id===t.accountId)||{name:''}).name:''}</div></div>
+      <div class="f1"><div style="font-weight:600;font-size:13px;display:flex;align-items:center;gap:2px">${t.desc}${authorTag(t)}</div><div style="font-size:11px;color:var(--muted)">${t.category}${t.accountId?' • '+(S.accounts.find(a=>a.id===t.accountId)||{name:''}).name:''}</div></div>
       <div class="col" style="align-items:flex-end;gap:3px">
         <div style="font-weight:700;font-size:14px;color:${t.type==='receita'?'#1DB954':'#E63946'}">${t.type==='receita'?'+':'−'}${fmt(t.amount)}</div>
         ${t.recurrent?bdg('recorrente','#3A86FF'):''}
@@ -1059,7 +1059,10 @@ window.joinCasalRoom=function(){
     if(!membros.includes(window.FB.uid))membros.push(window.FB.uid);
     db.collection('salas').doc(code).update({membros:membros});
     window._syncInitialized=false;window._knownPartnerIds=null;
-    window.FB.push();window._startCasalSync&&window._startCasalSync();
+    // Tag own transactions with author before pushing
+    (S.transactions||[]).forEach(function(t){if(!t._author)t._author=S.user.name;});
+    window.FB.push();
+    window._startCasalSync&&window._startCasalSync();
     alert('Entrou na sala de '+(data.criadorNome||'parceiro'));render();
   }).catch(function(e){alert('Erro: '+e.message);});
 };
@@ -1196,7 +1199,7 @@ window.saveTx=function(){
   const cat=$('tx-cat').value;if(!cat){alert('Selecione uma categoria.');return;}
   const date=$('tx-date').value;if(!date){alert('Informe a data.');return;}
   const id=$('tx-id').value;
-  const tx={id:id||uid(),type:$('tx-type').value,desc,amount:amt,category:cat,date,accountId:$('tx-acct').value||null,note:$('tx-note').value.trim(),recurrent:$('tx-rec').checked};
+  const tx={id:id||uid(),type:$('tx-type').value,desc,amount:amt,category:cat,date,accountId:$('tx-acct').value||null,note:$('tx-note').value.trim(),recurrent:$('tx-rec').checked,_author:S.user.name};
   if(id){const i=S.transactions.findIndex(t=>t.id===id);if(i>=0)S.transactions[i]=tx;}else S.transactions.push(tx);
   saveS();closeModal();render();
 };
@@ -1483,6 +1486,22 @@ window.getSignedVal=function(inputId, btnId){
 })();
 
 
+
+// Get 2-letter initials from name
+function initials(name){
+  if(!name)return'?';
+  var parts=name.trim().split(/\s+/);
+  if(parts.length>=2)return(parts[0][0]+parts[parts.length-1][0]).toUpperCase();
+  return name.slice(0,2).toUpperCase();
+}
+function authorTag(tx){
+  if(!tx._author)return'';
+  var isMe=tx._author===S.user.name;
+  var ini=initials(tx._author);
+  var col=isMe?'#3A86FF':'#9B59B6';
+  return'<span title="'+tx._author+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+col+';color:#fff;font-size:8px;font-weight:800;flex-shrink:0;margin-left:4px">'+ini+'</span>';
+}
+
 render();
 
 /* ══ CLOCK ══ */
@@ -1654,89 +1673,137 @@ render();
 
     window._startCasalSync=function(){
       var code=S.syncCode;if(!code)return;
-      if(window._casalUnsub)window._casalUnsub();
-      var unsub=db.collection('salas').doc(code).onSnapshot(function(salaSnap){
+      // Clean up previous listeners
+      if(window._casalUnsub){window._casalUnsub();window._casalUnsub=null;}
+      if(window._partnerUnsub){window._partnerUnsub();window._partnerUnsub=null;}
+      window._syncInitialized=false;
+      window._knownPartnerIds=new Set();
+      console.log('[Casal] Starting sync for sala:', code);
+
+      // Listen to sala to get partner UID
+      var salaUnsub=db.collection('salas').doc(code).onSnapshot(function(salaSnap){
         if(!salaSnap.exists){
-          console.warn('[Casal] sala nao encontrada:', code);
-          updateFbUI('error');
+          console.warn('[Casal] Sala not found:', code);
           return;
         }
         var membros=salaSnap.data().membros||[];
-        if(membros.length<=1){
-          // Only one member — waiting for partner to join
-          console.log('[Casal] aguardando parceiro(a) entrar na sala...');
+        console.log('[Casal] Membros:', membros, 'MyUID:', window.FB.uid);
+
+        // Find partner UID (anyone who is not me)
+        var partnerUID=null;
+        membros.forEach(function(uid){if(uid!==window.FB.uid)partnerUID=uid;});
+
+        if(!partnerUID){
+          console.log('[Casal] No partner yet, waiting...');
           return;
         }
-        membros.forEach(function(muid){
-          if(muid===window.FB.uid)return;
-          db.collection('users').doc(muid).onSnapshot(function(pSnap){
-            if(!pSnap.exists)return;
-            var pData=pSnap.data();
-            var pName=(pData.user&&pData.user.name)||'Parceiro(a)';
-            var nameChanged=(window._partnerName!==pName);
-            window._partnerName=pName;
-            if(!S.notifications)S.notifications=[];
-            if(!window._knownPartnerIds)window._knownPartnerIds=new Set();
 
-            if(!window._syncInitialized){
-              window._syncInitialized=true;
-              window._fbLock=true;
-              // First sync: add partner's transactions/goals only (keep own accounts)
-              var partnerTxs=pData.transactions||[];
-              var myTxIds=new Set((S.transactions||[]).map(function(t){return t.id;}));
-              partnerTxs.forEach(function(t){
-                if(!myTxIds.has(t.id))S.transactions.push(t);
-                window._knownPartnerIds.add(t.id);
-              });
-              (pData.goals||[]).forEach(function(g){
-                var myGIds=new Set((S.goals||[]).map(function(x){return x.id;}));
-                if(!myGIds.has(g.id))S.goals.push(g);
-                window._knownPartnerIds.add(g.id);
-              });
-              // Mark partner accounts as known but don't add (each user has own accounts)
-              (pData.accounts||[]).forEach(function(a){window._knownPartnerIds.add(a.id);});
-              saveLocal();
-              window._fbLock=false;
-              render();
-              return;
-            }
+        // If already listening to this partner, skip
+        if(window._currentPartnerUID===partnerUID)return;
+        window._currentPartnerUID=partnerUID;
 
-            var newTxs=(pData.transactions||[]).filter(function(t){return!window._knownPartnerIds.has(t.id);});
-            var newAccs=(pData.accounts||[]).filter(function(a){return!window._knownPartnerIds.has(a.id);});
-            var newGoals=(pData.goals||[]).filter(function(g){return!window._knownPartnerIds.has(g.id);});
-            var hasChanges=newTxs.length||newAccs.length||newGoals.length;
+        // Clean up old partner listener
+        if(window._partnerUnsub){window._partnerUnsub();window._partnerUnsub=null;}
 
-            if(hasChanges||nameChanged){
-              window._fbLock=true;
-              // Add new partner transactions (don't replace own data)
-              newTxs.forEach(function(t){S.transactions.push(t);window._knownPartnerIds.add(t.id);});
-              newGoals.forEach(function(g){S.goals.push(g);window._knownPartnerIds.add(g.id);});
-              newAccs.forEach(function(a){window._knownPartnerIds.add(a.id);}); // mark known, don't add
-              var today=new Date().toLocaleDateString('pt-BR');
-              newTxs.forEach(function(t){
-                S.notifications.push({id:t.id+'_n',icon:t.type==='receita'?'💰':'💸',
-                  msg:pName+(t.type==='receita'?' adicionou receita':' adicionou despesa')+': '+t.desc+' (R$ '+(+t.amount).toFixed(2).replace('.',',')+') em '+t.date,
-                  from:pName,date:today,read:false});
-              });
-              newAccs.forEach(function(a){S.notifications.push({id:a.id+'_n',icon:'🏦',msg:pName+' adicionou conta: '+a.name,from:pName,date:today,read:false});});
-              newGoals.forEach(function(g){S.notifications.push({id:g.id+'_n',icon:'🎯',msg:pName+' criou meta: '+g.name,from:pName,date:today,read:false});});
-              saveLocal();render();
-              window._fbLock=false;
-            }
-          }, function(userErr){
-            console.error('[Casal] users onSnapshot error:', userErr.code);
+        console.log('[Casal] Listening to partner:', partnerUID);
+
+        // Listen to partner's user document
+        var pUnsub=db.collection('users').doc(partnerUID).onSnapshot(function(pSnap){
+          if(!pSnap.exists){console.warn('[Casal] Partner doc not found');return;}
+          var pData=pSnap.data();
+          var pName=(pData.user&&pData.user.name)||'Parceiro(a)';
+          console.log('[Casal] Partner snapshot received, name:', pName);
+
+          // Always update partner name
+          var nameChanged=(window._partnerName!==pName);
+          window._partnerName=pName;
+
+          if(!S.notifications)S.notifications=[];
+          if(!window._knownPartnerIds)window._knownPartnerIds=new Set();
+
+          // FIRST SYNC: import all partner data silently
+          if(!window._syncInitialized){
+            window._syncInitialized=true;
+            window._fbLock=true;
+            console.log('[Casal] First sync - importing partner data silently');
+
+            // Add partner transactions not in mine
+            var myTxIds=new Set((S.transactions||[]).map(function(t){return t.id;}));
+            (pData.transactions||[]).forEach(function(t){
+              t._author=pName; // tag with author
+              if(!myTxIds.has(t.id))S.transactions.push(t);
+              window._knownPartnerIds.add(t.id);
+            });
+            // Add partner goals not in mine
+            var myGIds=new Set((S.goals||[]).map(function(g){return g.id;}));
+            (pData.goals||[]).forEach(function(g){
+              if(!myGIds.has(g.id))S.goals.push(g);
+              window._knownPartnerIds.add(g.id);
+            });
+            // Mark partner accounts as known (don't merge)
+            (pData.accounts||[]).forEach(function(a){window._knownPartnerIds.add(a.id);});
+
+            saveLocal();
+            window._fbLock=false;
+            render();
+            return;
+          }
+
+          // SUBSEQUENT SYNCS: detect truly new items
+          var newTxs=(pData.transactions||[]).filter(function(t){
+            return!window._knownPartnerIds.has(t.id);
           });
+          var newGoals=(pData.goals||[]).filter(function(g){
+            return!window._knownPartnerIds.has(g.id);
+          });
+          var hasChanges=newTxs.length||newGoals.length||nameChanged;
+
+          if(!hasChanges)return;
+
+          window._fbLock=true;
+
+          // Add new transactions with author tag
+          newTxs.forEach(function(t){
+            t._author=pName;
+            S.transactions.push(t);
+            window._knownPartnerIds.add(t.id);
+          });
+          newGoals.forEach(function(g){
+            S.goals.push(g);
+            window._knownPartnerIds.add(g.id);
+          });
+
+          // Notifications
+          var today=new Date().toLocaleDateString('pt-BR');
+          newTxs.forEach(function(t){
+            S.notifications.push({
+              id:t.id+'_n',
+              icon:t.type==='receita'?'💰':'💸',
+              msg:pName+(t.type==='receita'?' adicionou receita':' adicionou despesa')+': '+t.desc+' (R$ '+(+t.amount).toFixed(2).replace('.',',')+') em '+t.date,
+              from:pName,date:today,read:false
+            });
+          });
+          newGoals.forEach(function(g){
+            S.notifications.push({id:g.id+'_n',icon:'🎯',
+              msg:pName+' criou meta: '+g.name,from:pName,date:today,read:false});
+          });
+
+          saveLocal();
+          render();
+          window._fbLock=false;
+        }, function(err){
+          console.error('[Casal] Partner listener error:', err.code, err.message);
         });
+
+        window._partnerUnsub=pUnsub;
       }, function(err){
-        console.error('[Casal] salas error:', err.code, err.message);
-        updateFbUI('error');
-        // Common fix: Firestore rules don't include 'salas' collection
+        console.error('[Casal] Sala listener error:', err.code);
         if(err.code==='permission-denied'){
-          console.error('[Casal] ACAO NECESSARIA: Adicione a colecao salas nas regras do Firestore');
+          console.error('[Casal] Add salas collection to Firestore rules!');
         }
       });
-      window._casalUnsub=unsub;
-    };
+
+      window._casalUnsub=salaUnsub;
 
     if(S.syncCode)window._startCasalSync();
   });
