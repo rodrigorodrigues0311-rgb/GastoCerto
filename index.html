@@ -1548,8 +1548,17 @@ render();
       var code=S.syncCode;if(!code)return;
       if(window._casalUnsub)window._casalUnsub();
       var unsub=db.collection('salas').doc(code).onSnapshot(function(salaSnap){
-        if(!salaSnap.exists)return;
+        if(!salaSnap.exists){
+          console.warn('[Casal] sala nao encontrada:', code);
+          updateFbUI('error');
+          return;
+        }
         var membros=salaSnap.data().membros||[];
+        if(membros.length<=1){
+          // Only one member — waiting for partner to join
+          console.log('[Casal] aguardando parceiro(a) entrar na sala...');
+          return;
+        }
         membros.forEach(function(muid){
           if(muid===window.FB.uid)return;
           db.collection('users').doc(muid).onSnapshot(function(pSnap){
@@ -1564,10 +1573,21 @@ render();
             if(!window._syncInitialized){
               window._syncInitialized=true;
               window._fbLock=true;
-              window.FB.merge(pData,false);
-              (pData.transactions||[]).forEach(function(t){window._knownPartnerIds.add(t.id);});
+              // First sync: add partner's transactions/goals only (keep own accounts)
+              var partnerTxs=pData.transactions||[];
+              var myTxIds=new Set((S.transactions||[]).map(function(t){return t.id;}));
+              partnerTxs.forEach(function(t){
+                if(!myTxIds.has(t.id))S.transactions.push(t);
+                window._knownPartnerIds.add(t.id);
+              });
+              (pData.goals||[]).forEach(function(g){
+                var myGIds=new Set((S.goals||[]).map(function(x){return x.id;}));
+                if(!myGIds.has(g.id))S.goals.push(g);
+                window._knownPartnerIds.add(g.id);
+              });
+              // Mark partner accounts as known but don't add (each user has own accounts)
               (pData.accounts||[]).forEach(function(a){window._knownPartnerIds.add(a.id);});
-              (pData.goals||[]).forEach(function(g){window._knownPartnerIds.add(g.id);});
+              saveLocal();
               window._fbLock=false;
               render();
               return;
@@ -1580,10 +1600,10 @@ render();
 
             if(hasChanges||nameChanged){
               window._fbLock=true;
-              window.FB.merge(pData,false);
-              newTxs.forEach(function(t){window._knownPartnerIds.add(t.id);});
-              newAccs.forEach(function(a){window._knownPartnerIds.add(a.id);});
-              newGoals.forEach(function(g){window._knownPartnerIds.add(g.id);});
+              // Add new partner transactions (don't replace own data)
+              newTxs.forEach(function(t){S.transactions.push(t);window._knownPartnerIds.add(t.id);});
+              newGoals.forEach(function(g){S.goals.push(g);window._knownPartnerIds.add(g.id);});
+              newAccs.forEach(function(a){window._knownPartnerIds.add(a.id);}); // mark known, don't add
               var today=new Date().toLocaleDateString('pt-BR');
               newTxs.forEach(function(t){
                 S.notifications.push({id:t.id+'_n',icon:t.type==='receita'?'💰':'💸',
@@ -1595,8 +1615,17 @@ render();
               saveLocal();render();
               window._fbLock=false;
             }
+          }, function(userErr){
+            console.error('[Casal] users onSnapshot error:', userErr.code);
           });
         });
+      }, function(err){
+        console.error('[Casal] salas error:', err.code, err.message);
+        updateFbUI('error');
+        // Common fix: Firestore rules don't include 'salas' collection
+        if(err.code==='permission-denied'){
+          console.error('[Casal] ACAO NECESSARIA: Adicione a colecao salas nas regras do Firestore');
+        }
       });
       window._casalUnsub=unsub;
     };
