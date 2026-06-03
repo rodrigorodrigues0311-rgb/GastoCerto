@@ -175,11 +175,25 @@ img{display:block}
 .ai-wrap .ai{flex:1}
 .neg-btn{width:40px;height:52px;border-radius:12px;border:1.5px solid var(--border);background:#fff;font-size:22px;font-weight:700;color:var(--muted);cursor:pointer;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:all .2s}
 .neg-btn.active{border-color:var(--R);background:#FFF0F1;color:var(--R)}
+
+/* Pull-to-refresh */
+#ptr{
+  position:fixed;top:0;left:0;right:0;z-index:999;
+  display:flex;align-items:center;justify-content:center;
+  height:0;overflow:hidden;
+  background:linear-gradient(180deg,#E8F5E9,transparent);
+  transition:height .2s;pointer-events:none;
+}
+#ptr-inner{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:700;color:#1DB954;}
+#ptr-spin{font-size:20px;transition:transform .3s;}
+#ptr.ready #ptr-spin{animation:ptr-rotate .6s linear infinite;}
+@keyframes ptr-rotate{to{transform:rotate(360deg)}}
 </style>
 </head>
 <body>
 
 <!-- SPLASH -->
+<div id="ptr"><div id="ptr-inner"><span id="ptr-spin">↻</span><span id="ptr-txt">Puxe para atualizar</span></div></div>
 <div id="splash">
   <div id="sp-grid"></div>
   <div class="sg" id="sg1"></div><div class="sg" id="sg2"></div>
@@ -392,40 +406,56 @@ function navTo(id){
 }
 window.go=go;
 window.navTo=navTo;
-// back() just calls history.back() — popstate handles the rest
-window.back=function(){history.back();};
 
+// back(): if modal open → close modal; else → go to dashboard
+window.back=function(){
+  var ov=document.getElementById('ov');
+  var cov=document.getElementById('cov');
+  // If sheet/modal is open, close it
+  if(ov&&ov.classList.contains('show')){closeModal();return;}
+  if(cov&&cov.classList.contains('show')){cov.classList.remove('show');return;}
+  // If already on dashboard → show exit confirm
+  if(curNav==='dashboard'&&!curSc){showExitConfirm();return;}
+  // Otherwise → go to dashboard
+  curNav='dashboard';curSc=null;
+  history.replaceState({nav:'dashboard',sc:null},'');
+  render();
+};
+
+// Android hardware back button via popstate
 window.addEventListener('popstate',function(e){
-  const st=e.state;
-  if(!st){
-    // Reached bottom of stack — on dashboard show exit confirm, else go to dashboard
-    if(curNav==='dashboard'&&!curSc){
-      // re-push so we don't lose the entry
-      history.pushState({nav:'dashboard',sc:null},'');
-      showExitConfirm();
-    } else {
-      curNav='dashboard';curSc=null;
-      history.pushState({nav:'dashboard',sc:null},'');
-      render();
-    }
+  var ov=document.getElementById('ov');
+  var cov=document.getElementById('cov');
+  // If modal open → close it and re-push current state
+  if(ov&&ov.classList.contains('show')){
+    closeModal();
+    history.pushState({nav:curNav,sc:curSc},'');
     return;
   }
-  // Restore state
-  curNav=st.nav||'dashboard';
-  curSc=st.sc||null;
-  // If it's a sub-screen not in MAIN_NAVS, treat as sub-screen of current nav
+  if(cov&&cov.classList.contains('show')){
+    cov.classList.remove('show');
+    history.pushState({nav:curNav,sc:curSc},'');
+    return;
+  }
+  // If on dashboard → exit confirm
+  if(curNav==='dashboard'&&!curSc){
+    history.pushState({nav:'dashboard',sc:null},'');
+    showExitConfirm();
+    return;
+  }
+  // Any other screen → go to dashboard
+  curNav='dashboard';curSc=null;
+  history.replaceState({nav:'dashboard',sc:null},'');
   render();
 });
 
 function showExitConfirm(){
   showConfirm('🚪','Sair do app?','Deseja encerrar o GastoCerto?',[
-    {label:'Encerrar',style:'background:var(--R);color:#fff;',cb:()=>{
-      // Try to close the window/tab
+    {label:'Encerrar',style:'background:var(--R);color:#fff;',cb:function(){
       window.close();
-      // Fallback: navigate away
-      history.go(-(history.length));
+      setTimeout(function(){history.go(-(history.length));},300);
     }},
-    {label:'Cancelar',style:'background:var(--bg);color:var(--text);',cb:()=>{}}
+    {label:'Cancelar',style:'background:var(--bg);color:var(--text);',cb:function(){}}
   ]);
 }
 
@@ -1374,6 +1404,84 @@ window.getSignedVal=function(inputId, btnId){
   var neg=btn&&btn.classList.contains('active');
   return neg?-Math.abs(val):Math.abs(val);
 };
+
+
+/* ─── Pull-to-refresh ─── */
+(function(){
+  var ptr=document.getElementById('ptr');
+  var ptrSpin=document.getElementById('ptr-spin');
+  var ptrTxt=document.getElementById('ptr-txt');
+  var startY=0, pulling=false, triggered=false;
+  var THRESHOLD=72; // px needed to trigger refresh
+
+  function refresh(){
+    ptrTxt.textContent='Atualizando...';
+    ptrSpin.style.animation='ptr-rotate .6s linear infinite';
+    // Reload Firebase data + re-render
+    if(window.FB&&window.FB.uid){
+      var db=firebase.firestore();
+      db.collection('users').doc(window.FB.uid).get()
+        .then(function(snap){
+          if(snap.exists){window.FB.merge(snap.data(),true);}
+          finishRefresh();
+        }).catch(function(){finishRefresh();});
+    } else {
+      setTimeout(finishRefresh, 600);
+    }
+  }
+
+  function finishRefresh(){
+    ptr.style.height='0';
+    ptr.classList.remove('ready');
+    ptrSpin.style.animation='none';
+    ptrTxt.textContent='Puxe para atualizar';
+    triggered=false;
+    render();
+    updateFbUI('ok');
+  }
+
+  var screen=document.getElementById('screen');
+  if(!screen)return;
+
+  screen.addEventListener('touchstart',function(e){
+    if(screen.scrollTop===0){
+      startY=e.touches[0].clientY;
+      pulling=true;
+      triggered=false;
+    }
+  },{passive:true});
+
+  screen.addEventListener('touchmove',function(e){
+    if(!pulling)return;
+    var dy=e.touches[0].clientY-startY;
+    if(dy<=0){pulling=false;return;}
+    var h=Math.min(dy*0.5, 80);
+    ptr.style.height=h+'px';
+    if(h>=THRESHOLD*0.5){
+      ptrTxt.textContent=triggered?'Solte para atualizar':'Solte para atualizar';
+      ptr.classList.add('ready');
+    } else {
+      ptrTxt.textContent='Puxe para atualizar';
+      ptr.classList.remove('ready');
+    }
+  },{passive:true});
+
+  screen.addEventListener('touchend',function(){
+    if(!pulling)return;
+    pulling=false;
+    var h=parseInt(ptr.style.height)||0;
+    if(h>=THRESHOLD*0.5&&!triggered){
+      triggered=true;
+      ptr.style.height='52px';
+      refresh();
+    } else {
+      ptr.style.height='0';
+      ptr.classList.remove('ready');
+      triggered=false;
+    }
+  });
+})();
+
 
 render();
 
