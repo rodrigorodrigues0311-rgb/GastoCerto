@@ -1021,7 +1021,10 @@ window.savePerfil=function(){
 SCR.casal=()=>{
   var code=S.syncCode||'';var connected=!!code;
   var pName=window._partnerName||'Parceiro(a)';
-  var html='<div class="hdr"><button class="back" onclick="back()">&#8592;</button><h1>Modo Casal &#128145;</h1></div><div class="col gap12 p16" style="padding-bottom:24px"><div class="card" style="background:linear-gradient(135deg,#3A86FF,#2563EB);color:#fff;text-align:center;padding:20px"><div style="font-size:40px;margin-bottom:8px">&#128145;</div><div style="font-size:17px;font-weight:800;margin-bottom:4px">Financas em Casal</div><div style="font-size:13px;opacity:.85;line-height:1.5">Compartilhe um codigo com seu parceiro(a) e controlem as financas juntos em tempo real.</div></div>';
+  var fbReady=window.FB&&window.FB.uid;
+  var html='<div class="hdr"><button class="back" onclick="back()">&#8592;</button><h1>Modo Casal &#128145;</h1></div>'
+    +(fbReady?'':'<div style="background:#FFF7ED;border-bottom:2px solid #FED7AA;padding:10px 16px;display:flex;align-items:center;gap:8px"><div style="width:8px;height:8px;border-radius:50%;background:#F4A261;animation:fbp .6s ease-in-out infinite alternate;flex-shrink:0"></div><span style="font-size:12px;font-weight:600;color:#C2410C">Conectando ao Firebase... aguarde</span></div>')
+    +'<div class="col gap12 p16" style="padding-bottom:24px"><div class="card" style="background:linear-gradient(135deg,#3A86FF,#2563EB);color:#fff;text-align:center;padding:20px"><div style="font-size:40px;margin-bottom:8px">&#128145;</div><div style="font-size:17px;font-weight:800;margin-bottom:4px">Financas em Casal</div><div style="font-size:13px;opacity:.85;line-height:1.5">Compartilhe um codigo com seu parceiro(a) e controlem as financas juntos em tempo real.</div></div>';
   if(connected){
     html+='<div class="card" style="border:2px solid #1DB954"><div style="font-weight:700;font-size:14px;color:#1DB954;margin-bottom:8px">Modo Casal Ativo</div>'
       +'<div class="row" style="background:#F0FFF4;border-radius:12px;padding:10px;justify-content:space-around;text-align:center;margin-bottom:12px">'
@@ -1039,7 +1042,17 @@ SCR.casal=()=>{
   return html;
 };
 window.createCasalRoom=function(){
-  if(!window.FB||!window.FB.uid){alert('Aguarde a conexao com Firebase.');return;}
+  if(!window.FB||!window.FB.uid){
+    // Firebase not ready yet — retry in 2 seconds
+    var btn=document.querySelector('[onclick="window.createCasalRoom()"]');
+    if(btn){btn.textContent='Conectando...';btn.disabled=true;}
+    setTimeout(function(){
+      if(btn){btn.textContent='Criar sala de casal';btn.disabled=false;}
+      if(window.FB&&window.FB.uid){window.createCasalRoom();}
+      else{alert('Sem conexão com Firebase. Verifique sua internet e tente novamente.');}
+    },2500);
+    return;
+  }
   var code=Math.random().toString(36).slice(2,8).toUpperCase();
   S.syncCode=code;saveLocal();
   var db=firebase.firestore();
@@ -1053,7 +1066,16 @@ window.joinCasalRoom=function(){
   var input=document.getElementById('casal-code-input');
   var code=input?(input.value||'').toUpperCase().trim():'';
   if(!code||code.length<4){alert('Digite um codigo valido.');return;}
-  if(!window.FB||!window.FB.uid){alert('Aguarde a conexao com Firebase.');return;}
+  if(!window.FB||!window.FB.uid){
+    var btn=document.querySelector('[onclick="window.joinCasalRoom()"]');
+    if(btn){btn.textContent='Conectando...';btn.disabled=true;}
+    setTimeout(function(){
+      if(btn){btn.textContent='Entrar na sala';btn.disabled=false;}
+      if(window.FB&&window.FB.uid){window.joinCasalRoom();}
+      else{alert('Sem conexão com Firebase. Verifique sua internet e tente novamente.');}
+    },2500);
+    return;
+  }
   var db=firebase.firestore();
   db.collection('salas').doc(code).get().then(function(snap){
     if(!snap.exists){alert('Sala nao encontrada.');return;}
@@ -1672,6 +1694,8 @@ render();
     if(!user){updateFbUI('error');return;}
     window.FB.uid=user.uid;
     updateFbUI('syncing');
+    // Re-render casal screen if open (so buttons become active)
+    if((curSc||curNav)==='casal'){render();}
     var ref=db.collection('users').doc(user.uid);
 
     ref.get().then(function(snap){
