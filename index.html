@@ -510,6 +510,22 @@ window.showConfirm=showConfirm;
 /* ══════════════════════════════════════════════════
    SCREEN: DASHBOARD
 ══════════════════════════════════════════════════ */
+
+// ─── Author helpers (must be before SCR.dashboard) ───
+function initials(name){
+  if(!name)return'?';
+  var parts=name.trim().split(/\s+/);
+  if(parts.length>=2)return(parts[0][0]+parts[parts.length-1][0]).toUpperCase();
+  return name.slice(0,2).toUpperCase();
+}
+function authorTag(tx){
+  if(!tx||!tx._author)return'';
+  var isMe=(tx._author===S.user.name);
+  var ini=initials(tx._author);
+  var col=isMe?'#3A86FF':'#9B59B6';
+  return'<span title="'+tx._author+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+col+';color:#fff;font-size:8px;font-weight:800;flex-shrink:0;margin-left:4px">'+ini+'</span>';
+}
+
 SCR.dashboard=()=>{
   const txs=txsM(nowM());
   const rec=sumT(txs,'receita'),desp=sumT(txs,'despesa'),res=rec-desp;
@@ -1515,20 +1531,6 @@ window.getSignedVal=function(inputId, btnId){
 
 
 
-// Get 2-letter initials from name
-function initials(name){
-  if(!name)return'?';
-  var parts=name.trim().split(/\s+/);
-  if(parts.length>=2)return(parts[0][0]+parts[parts.length-1][0]).toUpperCase();
-  return name.slice(0,2).toUpperCase();
-}
-function authorTag(tx){
-  if(!tx._author)return'';
-  var isMe=tx._author===S.user.name;
-  var ini=initials(tx._author);
-  var col=isMe?'#3A86FF':'#9B59B6';
-  return'<span title="'+tx._author+'" style="display:inline-flex;align-items:center;justify-content:center;width:16px;height:16px;border-radius:50%;background:'+col+';color:#fff;font-size:8px;font-weight:800;flex-shrink:0;margin-left:4px">'+ini+'</span>';
-}
 
 render();
 
@@ -1662,9 +1664,16 @@ render();
     push:function(){
       if(!window.FB.uid)return Promise.reject('not auth');
       updateFbUI('syncing');
+      // Save only OWN transactions to Firestore (partner txs are read-only from partner's doc)
+      var ownTxs=S.transactions.filter(function(t){
+        return !t._author || t._author===S.user.name;
+      });
+      var ownGoals=S.goals.filter(function(g){
+        return !g._author || g._author===S.user.name;
+      });
       return db.collection('users').doc(window.FB.uid).set({
-        user:S.user,accounts:S.accounts,transactions:S.transactions,
-        budgets:S.budgets,goals:S.goals,cats:S.cats,
+        user:S.user,accounts:S.accounts,transactions:ownTxs,
+        budgets:S.budgets,goals:ownGoals,cats:S.cats,
         updatedAt:new Date().toISOString()
       }).then(function(){updateFbUI('ok');}).catch(function(e){updateFbUI('error');throw e;});
     },
@@ -1699,13 +1708,43 @@ render();
     var ref=db.collection('users').doc(user.uid);
 
     ref.get().then(function(snap){
-      if(snap.exists){window.FB.merge(snap.data(),true);render();}
-      else{window.FB.push();}
+      if(snap.exists){
+        var d=snap.data();
+        // Tag own transactions with author name
+        if(d.transactions){d.transactions.forEach(function(t){if(!t._author)t._author=d.user&&d.user.name||S.user.name;});}
+        if(d.goals){d.goals.forEach(function(g){if(!g._author)g._author=d.user&&d.user.name||S.user.name;});}
+        window.FB.merge(d,true);render();
+      } else{
+        // New user: tag existing txs
+        S.transactions.forEach(function(t){if(!t._author)t._author=S.user.name;});
+        window.FB.push();
+      }
       updateFbUI('idle');
     }).catch(function(e){updateFbUI('error');console.error('[FB] load',e.code);});
 
     ref.onSnapshot(function(snap){
-      if(snap.exists&&!window._fbLock){window.FB.merge(snap.data(),true);render();updateFbUI('idle');}
+      if(snap.exists&&!window._fbLock){
+        var data=snap.data();
+        // Smart merge: update own profile/accounts/budgets/goals/cats
+        // but for transactions: only update ones authored by self
+        if(data.user)S.user=data.user;
+        if(data.accounts)S.accounts=data.accounts;
+        if(data.budgets)S.budgets=data.budgets;
+        if(data.goals){
+          // Keep partner goals, update own
+          var partnerGoals=S.goals.filter(function(g){return g._author&&g._author!==S.user.name;});
+          S.goals=(data.goals||[]).concat(partnerGoals);
+        }
+        if(data.cats)S.cats=data.cats;
+        if(data.transactions){
+          // Keep partner txs in memory, replace own txs from Firestore
+          var partnerTxs=S.transactions.filter(function(t){
+            return t._author && t._author!==S.user.name;
+          });
+          S.transactions=(data.transactions||[]).concat(partnerTxs);
+        }
+        saveLocal();render();updateFbUI('idle');
+      }
     },function(e){updateFbUI('error');});
 
     window._startCasalSync=function(){
