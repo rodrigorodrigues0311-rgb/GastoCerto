@@ -1080,7 +1080,7 @@ window.createCasalRoom=function(){
   salaDoc['nome_'+window.FB.uid]=S.user.name;
   db.collection('salas').doc(code).set(salaDoc)
     .then(function(){
-      tagOwn&&tagOwn();
+      tagOwn();
       window.FB.push().then(function(){
         window._startCasalSync&&window._startCasalSync();
       });
@@ -1127,7 +1127,7 @@ window.joinCasalRoom=function(){
         });
       }
       S.transactions=mergedTxs;
-      tagOwn&&tagOwn();
+      tagOwn();
       window.FB.push().then(function(){
         window._startCasalSync&&window._startCasalSync();
       });
@@ -1561,6 +1561,16 @@ window.getSignedVal=function(inputId, btnId){
 
 
 
+
+// Tag own transactions/goals with author name (global)
+window.tagOwn=function(){
+  var name=S.user&&S.user.name||'Usuário';
+  (S.transactions||[]).forEach(function(t){if(!t._author)t._author=name;});
+  (S.goals||[]).forEach(function(g){if(!g._author)g._author=name;});
+};
+function tagOwn(){window.tagOwn();}
+
+
 render();
 
 /* ══ CLOCK ══ */
@@ -1697,12 +1707,6 @@ render();
 
   // ── Helpers ──────────────────────────────────────────────────────────────
   function myName(){return S.user&&S.user.name||'Usuário';}
-
-  // Tag all own transactions/goals with author
-  function tagOwn(){
-    (S.transactions||[]).forEach(function(t){if(!t._author)t._author=myName();});
-    (S.goals||[]).forEach(function(g){if(!g._author)g._author=myName();});
-  }
 
   // ── FB object ─────────────────────────────────────────────────────────────
   window.FB={
