@@ -1007,12 +1007,35 @@ SCR.perfil=()=>{
 window.handlePhoto=function(e){
   const file=e.target.files[0];
   if(!file)return;
+  // Compress image before saving (max 400px, quality 0.7)
+  const img=new Image();
   const reader=new FileReader();
   reader.onload=ev=>{
-    S.user.photo=ev.target.result;
-    saveS();
-    const prev=$('photo-preview');
-    if(prev)prev.innerHTML=`<img src="${ev.target.result}" style="width:100%;height:100%;object-fit:cover">`;
+    img.onload=function(){
+      const MAX=400;
+      const canvas=document.createElement('canvas');
+      let w=img.width, h=img.height;
+      if(w>h){if(w>MAX){h=Math.round(h*MAX/w);w=MAX;}}
+      else{if(h>MAX){w=Math.round(w*MAX/h);h=MAX;}}
+      canvas.width=w; canvas.height=h;
+      canvas.getContext('2d').drawImage(img,0,0,w,h);
+      const compressed=canvas.toDataURL('image/jpeg',0.7);
+      S.user.photo=compressed;
+      saveLocal();
+      // Push profile to users/{uid} AND update shared financial doc
+      if(window.FB&&window.FB.uid){
+        if(window.FB.pushProfile){
+          window.FB.pushProfile().then(function(){
+            console.log('[Photo] profile saved');
+            // Also update shared doc so partner sees the change
+            if(window.FB.push) window.FB.push();
+          }).catch(function(err){console.warn('[Photo] save error:',err);});
+        }
+      }
+      const prev=$('photo-preview');
+      if(prev)prev.innerHTML=`<img src="${compressed}" style="width:100%;height:100%;object-fit:cover">`;
+    };
+    img.src=ev.target.result;
   };
   reader.readAsDataURL(file);
 };
@@ -1976,10 +1999,11 @@ render();
     // Push own PROFILE to users/{uid}
     pushProfile:function(){
       if(!window.FB.uid)return Promise.resolve();
+      // Save full user object including photo
       return db.collection('users').doc(window.FB.uid).set({
         user:S.user,
         updatedAt:new Date().toISOString()
-      },{merge:true}).catch(function(e){console.warn('[FB] pushProfile:',e.code);});
+      }).catch(function(e){console.warn('[FB] pushProfile:',e.code);});
     },
 
     // Push shared financial data
@@ -1997,6 +2021,7 @@ render();
         cats:S.cats,
         updatedAt:new Date().toISOString(),
         updatedBy:myName()
+        // Note: user profile (including photo) is saved separately via pushProfile()
       };
       var ref=S.syncCode
         ? db.collection('salas').doc(S.syncCode).collection('dados').doc('shared')
@@ -2056,7 +2081,7 @@ render();
         console.log('[FB] data snapshot, updatedBy:',d.updatedBy,
           'txs:',( d.transactions||[]).length);
 
-        // Update financial data
+        // Update financial data (NOT user profile — that comes from users/{uid})
         if(d.accounts)S.accounts=d.accounts;
         if(d.transactions)S.transactions=d.transactions;
         if(d.budgets)S.budgets=d.budgets;
@@ -2114,7 +2139,10 @@ render();
     // ── Listen to own profile changes ────────────────────────────────────────
     db.collection('users').doc(user.uid).onSnapshot(function(snap){
       if(snap.exists&&snap.data().user){
-        S.user=snap.data().user;
+        var remoteUser=snap.data().user;
+        // Keep local photo if remote has none (prevents photo loss on sync)
+        if(!remoteUser.photo&&S.user.photo)remoteUser.photo=S.user.photo;
+        S.user=remoteUser;
         render();
       }
     },function(e){console.warn('[FB] profile listener:',e.code);});
