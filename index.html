@@ -1018,8 +1018,12 @@ window.savePerfil=function(){
   if(btn){btn.textContent='Salvando...';btn.style.background='#F4A261';btn.disabled=true;}
   saveLocal();
   if(window.FB&&window.FB.uid){
-    window.FB.push().then(function(){
-      if(window.FB.updateSalaName)window.FB.updateSalaName();
+    window.FB.pushProfile().then(function(){
+      // Also update name in sala if in casal mode
+      if(S.syncCode&&window.FB.uid){
+        var upd={};upd['nome_'+window.FB.uid]=S.user.name;
+        firebase.firestore().collection('salas').doc(S.syncCode).set(upd,{merge:true}).catch(function(){});
+      }
       if(btn){btn.textContent='Salvo!';btn.style.background='#1DB954';btn.disabled=false;}
       setTimeout(function(){back();render();},1200);
     }).catch(function(){
@@ -1075,7 +1079,13 @@ window.createCasalRoom=function(){
   var salaDoc={criador:window.FB.uid,criadorNome:S.user.name,criadoEm:new Date().toISOString(),membros:[window.FB.uid]};
   salaDoc['nome_'+window.FB.uid]=S.user.name;
   db.collection('salas').doc(code).set(salaDoc)
-    .then(function(){window.FB.push();window._startCasalSync&&window._startCasalSync();alert('Sala criada! Codigo: '+code);render();})
+    .then(function(){
+      tagOwn&&tagOwn();
+      window.FB.push().then(function(){
+        window._startCasalSync&&window._startCasalSync();
+      });
+      alert('Sala criada! Codigo: '+code);render();
+    })
     .catch(function(e){alert('Erro: '+e.message);});
 };
 window.joinCasalRoom=function(){
@@ -1105,8 +1115,27 @@ window.joinCasalRoom=function(){
     // Write own name into sala
     var upd={};upd['nome_'+window.FB.uid]=S.user.name;
     db.collection('salas').doc(code).update(upd).catch(function(){});
-    window.FB.push();
-    window._startCasalSync&&window._startCasalSync();
+    // First push current data to shared ref BEFORE switching listener
+    var sharedRef2=firebase.firestore().collection('salas').doc(code).collection('dados').doc('shared');
+    // Get existing shared data first to merge
+    sharedRef2.get().then(function(existSnap){
+      var mergedTxs=S.transactions.slice();
+      if(existSnap.exists&&existSnap.data().transactions){
+        var existIds=new Set(mergedTxs.map(function(t){return t.id;}));
+        (existSnap.data().transactions||[]).forEach(function(t){
+          if(!existIds.has(t.id))mergedTxs.push(t);
+        });
+      }
+      S.transactions=mergedTxs;
+      tagOwn&&tagOwn();
+      window.FB.push().then(function(){
+        window._startCasalSync&&window._startCasalSync();
+      });
+    }).catch(function(){
+      window.FB.push().then(function(){
+        window._startCasalSync&&window._startCasalSync();
+      });
+    });
     alert('Entrou na sala de '+(data.criadorNome||'parceiro'));render();
   }).catch(function(e){alert('Erro: '+e.message);});
 };
@@ -1655,233 +1684,213 @@ render();
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script>
 (function(){
-  var app=firebase.apps.length?firebase.app():firebase.initializeApp({apiKey:"AIzaSyCA4z_LJhQ1ZK-YAZgjnYfxKrjZx8iz-G8",authDomain:"gastocerto-7da6d.firebaseapp.com",projectId:"gastocerto-7da6d",storageBucket:"gastocerto-7da6d.firebasestorage.app",messagingSenderId:"264328179853",appId:"1:264328179853:web:5f8deb2cc373f85149b2c4"});
+  var app=firebase.apps.length?firebase.app():firebase.initializeApp({
+    apiKey:"AIzaSyCA4z_LJhQ1ZK-YAZgjnYfxKrjZx8iz-G8",
+    authDomain:"gastocerto-7da6d.firebaseapp.com",
+    projectId:"gastocerto-7da6d",
+    storageBucket:"gastocerto-7da6d.firebasestorage.app",
+    messagingSenderId:"264328179853",
+    appId:"1:264328179853:web:5f8deb2cc373f85149b2c4"
+  });
   var db=firebase.firestore();
   var auth=firebase.auth();
 
+  // ── Helpers ──────────────────────────────────────────────────────────────
+  function myName(){return S.user&&S.user.name||'Usuário';}
+
+  // Tag all own transactions/goals with author
+  function tagOwn(){
+    (S.transactions||[]).forEach(function(t){if(!t._author)t._author=myName();});
+    (S.goals||[]).forEach(function(g){if(!g._author)g._author=myName();});
+  }
+
+  // ── FB object ─────────────────────────────────────────────────────────────
   window.FB={
     uid:null,
+
+    // Push own PROFILE to users/{uid}
+    pushProfile:function(){
+      if(!window.FB.uid)return Promise.resolve();
+      return db.collection('users').doc(window.FB.uid).set({
+        user:S.user,
+        updatedAt:new Date().toISOString()
+      },{merge:true}).catch(function(e){console.warn('[FB] pushProfile:',e.code);});
+    },
+
+    // Push shared financial data
+    // If in casal mode → write to salas/{code}/dados (shared)
+    // If solo → write to users/{uid}/dados
     push:function(){
       if(!window.FB.uid)return Promise.reject('not auth');
+      tagOwn();
       updateFbUI('syncing');
-      // Save only OWN transactions to Firestore (partner txs are read-only from partner's doc)
-      var ownTxs=S.transactions.filter(function(t){
-        return !t._author || t._author===S.user.name;
+      var data={
+        accounts:S.accounts,
+        transactions:S.transactions,
+        budgets:S.budgets,
+        goals:S.goals,
+        cats:S.cats,
+        updatedAt:new Date().toISOString(),
+        updatedBy:myName()
+      };
+      var ref=S.syncCode
+        ? db.collection('salas').doc(S.syncCode).collection('dados').doc('shared')
+        : db.collection('users').doc(window.FB.uid).collection('dados').doc('financeiro');
+      return ref.set(data).then(function(){
+        updateFbUI('ok');
+      }).catch(function(e){
+        updateFbUI('error');
+        console.error('[FB] push error:',e.code,e.message);
+        throw e;
       });
-      var ownGoals=S.goals.filter(function(g){
-        return !g._author || g._author===S.user.name;
-      });
-      return db.collection('users').doc(window.FB.uid).set({
-        user:S.user,accounts:S.accounts,transactions:ownTxs,
-        budgets:S.budgets,goals:ownGoals,cats:S.cats,
-        updatedAt:new Date().toISOString()
-      }).then(function(){updateFbUI('ok');}).catch(function(e){updateFbUI('error');throw e;});
     },
-    updateSalaName:function(){
-      // Update own name in sala whenever profile changes
-      if(S.syncCode&&window.FB.uid){
-        var upd={};upd['nome_'+window.FB.uid]=S.user.name;
-        db.collection('salas').doc(S.syncCode).update(upd).catch(function(){});
-      }
-    },
-    merge:function(d,keepUser){
-      if(!d)return;
-      if(d.user&&keepUser)S.user=d.user;
-      if(d.accounts)S.accounts=d.accounts;
-      if(d.transactions)S.transactions=d.transactions;
-      if(d.budgets)S.budgets=d.budgets;
-      if(d.goals)S.goals=d.goals;
-      if(d.cats)S.cats=d.cats;
-      saveLocal();
+
+    // Save to both (profile + financial)
+    save:function(){
+      window.FB.pushProfile();
+      return window.FB.push();
     }
   };
 
+  // Make saveS use the new FB
+  // (redefine saveS to also push profile when needed)
+
+  // ── Auth ──────────────────────────────────────────────────────────────────
   updateFbUI('syncing');
-  auth.signInAnonymously().catch(function(e){updateFbUI('error');console.error('[FB]',e.code);});
+  auth.signInAnonymously().catch(function(e){
+    updateFbUI('error');
+    console.error('[FB] auth error:',e.code);
+  });
 
   auth.onAuthStateChanged(function(user){
     if(!user){updateFbUI('error');return;}
     window.FB.uid=user.uid;
+    console.log('[FB] auth OK, uid:',user.uid);
     updateFbUI('syncing');
-    // Re-render casal screen if open (so buttons become active)
-    if((curSc||curNav)==='casal'){render();}
-    var ref=db.collection('users').doc(user.uid);
 
-    ref.get().then(function(snap){
-      if(snap.exists){
+    // Re-render casal screen if open
+    if((curSc||curNav)==='casal')render();
+
+    // ── Load own profile ────────────────────────────────────────────────────
+    db.collection('users').doc(user.uid).get().then(function(snap){
+      if(snap.exists&&snap.data().user){
+        S.user=snap.data().user;
+      }
+    }).catch(function(e){console.warn('[FB] profile load:',e.code);});
+
+    // ── Load & listen to financial data ─────────────────────────────────────
+    function setupDataListener(ref){
+      if(window._dataUnsub){try{window._dataUnsub();}catch(e){}}
+      window._dataUnsub=ref.onSnapshot(function(snap){
+        if(!snap.exists){
+          // No data yet — push current local state
+          window.FB.push();
+          return;
+        }
         var d=snap.data();
-        // Tag own transactions with author name
-        if(d.transactions){d.transactions.forEach(function(t){if(!t._author)t._author=d.user&&d.user.name||S.user.name;});}
-        if(d.goals){d.goals.forEach(function(g){if(!g._author)g._author=d.user&&d.user.name||S.user.name;});}
-        window.FB.merge(d,true);render();
-      } else{
-        // New user: tag existing txs
-        S.transactions.forEach(function(t){if(!t._author)t._author=S.user.name;});
-        window.FB.push();
-      }
-      updateFbUI('idle');
-    }).catch(function(e){updateFbUI('error');console.error('[FB] load',e.code);});
+        console.log('[FB] data snapshot, updatedBy:',d.updatedBy,
+          'txs:',( d.transactions||[]).length);
 
-    ref.onSnapshot(function(snap){
-      if(!snap.exists)return;
-      // Always process own snapshot (don't block with _fbLock)
-      var data=snap.data();
-      var myName=S.user.name;
-      if(data.user)S.user=data.user;
-      if(data.accounts)S.accounts=data.accounts;
-      if(data.budgets)S.budgets=data.budgets;
-      if(data.cats)S.cats=data.cats;
-      if(data.goals){
-        var partnerGoals=S.goals.filter(function(g){return g._author&&g._author!==myName;});
-        S.goals=(data.goals||[]).concat(partnerGoals);
-      }
-      if(data.transactions){
-        var partnerTxs=S.transactions.filter(function(t){return t._author&&t._author!==myName;});
-        S.transactions=(data.transactions||[]).concat(partnerTxs);
-      }
-      saveLocal();render();updateFbUI('idle');
-    },function(e){updateFbUI('error');});
+        // Update financial data
+        if(d.accounts)S.accounts=d.accounts;
+        if(d.transactions)S.transactions=d.transactions;
+        if(d.budgets)S.budgets=d.budgets;
+        if(d.goals)S.goals=d.goals;
+        if(d.cats)S.cats=d.cats;
 
+        // Notifications: if updated by partner, check for new items
+        if(d.updatedBy && d.updatedBy!==myName() && window._lastTxCount!==undefined){
+          var myKnown=window._knownTxIds||(window._knownTxIds=new Set());
+          var newTxs=(d.transactions||[]).filter(function(t){
+            return t._author&&t._author!==myName()&&!myKnown.has(t.id);
+          });
+          newTxs.forEach(function(t){
+            myKnown.add(t.id);
+            if(!S.notifications)S.notifications=[];
+            S.notifications.push({
+              id:t.id+'_n',
+              icon:t.type==='receita'?'💰':'💸',
+              msg:t._author+(t.type==='receita'?' adicionou receita':' adicionou despesa')
+                +': '+t.desc+' (R$ '+(+t.amount).toFixed(2).replace('.',',')+')',
+              from:t._author,
+              date:new Date().toLocaleDateString('pt-BR'),
+              read:false
+            });
+          });
+        }
+
+        // Mark all current partner txs as known
+        if(!window._knownTxIds)window._knownTxIds=new Set();
+        (d.transactions||[]).forEach(function(t){
+          if(t._author&&t._author!==myName())window._knownTxIds.add(t.id);
+        });
+        window._lastTxCount=(d.transactions||[]).length;
+
+        saveLocal();
+        render();
+        updateFbUI('idle');
+      }, function(e){
+        console.error('[FB] data listener error:',e.code,e.message);
+        updateFbUI('error');
+        // Fallback: try solo data ref
+        if(e.code==='permission-denied'&&S.syncCode){
+          console.warn('[FB] Permission denied on salas — check Firestore rules');
+        }
+      });
+    }
+
+    // Start with appropriate ref
+    var dataRef=S.syncCode
+      ? db.collection('salas').doc(S.syncCode).collection('dados').doc('shared')
+      : db.collection('users').doc(user.uid).collection('dados').doc('financeiro');
+
+    setupDataListener(dataRef);
+
+    // ── Listen to own profile changes ────────────────────────────────────────
+    db.collection('users').doc(user.uid).onSnapshot(function(snap){
+      if(snap.exists&&snap.data().user){
+        S.user=snap.data().user;
+        render();
+      }
+    },function(e){console.warn('[FB] profile listener:',e.code);});
+
+    // ── Casal sync setup ─────────────────────────────────────────────────────
     window._startCasalSync=function(){
       var code=S.syncCode;
-      if(!code)return;
-      // Cleanup previous listeners
-      if(window._casalUnsub){try{window._casalUnsub();}catch(e){} window._casalUnsub=null;}
-      if(window._partnerUnsub){try{window._partnerUnsub();}catch(e){} window._partnerUnsub=null;}
-      window._syncInitialized=false;
-      window._knownPartnerIds=new Set();
-      window._currentPartnerUID=null;
+      if(!code||!window.FB.uid){return;}
+      console.log('[Casal] Starting sync for sala:',code);
+      window._knownTxIds=null; // reset known IDs on new sync
 
-      console.log('[Casal] Starting sync, code:', code, 'myUID:', window.FB.uid);
-
-      // Step 1: Write my name into the sala so partner can read it
-      var mySalaData={};
-      mySalaData['nome_'+window.FB.uid]=S.user.name;
-      db.collection('salas').doc(code).update(mySalaData).catch(function(){
-        // sala might not have this field yet — set it
-        db.collection('salas').doc(code).set(mySalaData,{merge:true}).catch(function(e){
-          console.warn('[Casal] Could not write name to sala:', e.code);
-        });
+      // Write own name to sala
+      var nameData={};
+      nameData['nome_'+window.FB.uid]=myName();
+      db.collection('salas').doc(code).set(nameData,{merge:true}).catch(function(e){
+        console.warn('[Casal] write name error:',e.code);
       });
 
-      // Step 2: Listen to sala document for members + partner name
-      var salaUnsub=db.collection('salas').doc(code).onSnapshot(function(salaSnap){
-        if(!salaSnap.exists){
-          console.warn('[Casal] Sala not found:', code);
-          return;
-        }
-        var salaData=salaSnap.data();
-        var membros=salaData.membros||[];
-        console.log('[Casal] Sala snapshot, membros:', membros);
-
-        // Find partner UID
-        var partnerUID=null;
-        membros.forEach(function(uid){if(uid!==window.FB.uid)partnerUID=uid;});
-
-        // Try to get partner name from sala doc (more reliable)
-        if(partnerUID && salaData['nome_'+partnerUID]){
-          var nameFromSala=salaData['nome_'+partnerUID];
-          if(nameFromSala && nameFromSala!==window._partnerName){
-            console.log('[Casal] Partner name from sala:', nameFromSala);
-            window._partnerName=nameFromSala;
-            render();
+      // Listen to sala for partner name
+      if(window._salaUnsub){try{window._salaUnsub();}catch(e){}}
+      window._salaUnsub=db.collection('salas').doc(code).onSnapshot(function(snap){
+        if(!snap.exists)return;
+        var d=snap.data();
+        var membros=d.membros||[];
+        membros.forEach(function(uid){
+          if(uid!==window.FB.uid&&d['nome_'+uid]){
+            window._partnerName=d['nome_'+uid];
           }
-        }
-
-        if(!partnerUID){
-          console.log('[Casal] No partner UID yet');
-          return;
-        }
-
-        // Only setup user listener once per partner
-        if(window._currentPartnerUID===partnerUID)return;
-        window._currentPartnerUID=partnerUID;
-
-        // Clean old user listener
-        if(window._partnerUnsub){try{window._partnerUnsub();}catch(e){} window._partnerUnsub=null;}
-
-        console.log('[Casal] Setting up listener for partner:', partnerUID);
-
-        // Step 3: Listen to partner's user document
-        var pUnsub=db.collection('users').doc(partnerUID).onSnapshot(function(pSnap){
-          if(!pSnap.exists){console.warn('[Casal] Partner doc not found');return;}
-          var pData=pSnap.data();
-          var pName=(pData.user&&pData.user.name)||window._partnerName||'Parceiro(a)';
-          console.log('[Casal] Partner user snapshot, name:', pName, 'txs:', (pData.transactions||[]).length);
-
-          // Update partner name in sala too
-          if(pName && pName!=='Parceiro(a)'){
-            window._partnerName=pName;
-            var upd={};upd['nome_'+partnerUID]=pName;
-            db.collection('salas').doc(code).update(upd).catch(function(){});
-          }
-
-          if(!S.notifications)S.notifications=[];
-          if(!window._knownPartnerIds)window._knownPartnerIds=new Set();
-
-          // FIRST SYNC: import silently
-          if(!window._syncInitialized){
-            window._syncInitialized=true;
-            console.log('[Casal] First sync, importing partner data...');
-            // No fbLock needed for first sync
-            var myTxIds=new Set((S.transactions||[]).map(function(t){return t.id;}));
-            (pData.transactions||[]).forEach(function(t){
-              t._author=pName;
-              if(!myTxIds.has(t.id))S.transactions.push(t);
-              window._knownPartnerIds.add(t.id);
-            });
-            var myGIds=new Set((S.goals||[]).map(function(g){return g.id;}));
-            (pData.goals||[]).forEach(function(g){
-              if(!myGIds.has(g.id))S.goals.push(g);
-              window._knownPartnerIds.add(g.id);
-            });
-            (pData.accounts||[]).forEach(function(a){window._knownPartnerIds.add(a.id);});
-            saveLocal();
-            render();
-            return;
-          }
-
-          // SUBSEQUENT SYNCS: only new items
-          var newTxs=(pData.transactions||[]).filter(function(t){return!window._knownPartnerIds.has(t.id);});
-          var newGoals=(pData.goals||[]).filter(function(g){return!window._knownPartnerIds.has(g.id);});
-
-          if(!newTxs.length&&!newGoals.length)return;
-
-          console.log('[Casal] New items from partner - txs:', newTxs.length, 'goals:', newGoals.length);
-          var today=new Date().toLocaleDateString('pt-BR');
-
-          newTxs.forEach(function(t){
-            t._author=pName;
-            S.transactions.push(t);
-            window._knownPartnerIds.add(t.id);
-            S.notifications.push({
-              id:t.id+'_n',icon:t.type==='receita'?'💰':'💸',
-              msg:pName+(t.type==='receita'?' adicionou receita':' adicionou despesa')+': '+t.desc+' (R$ '+(+t.amount).toFixed(2).replace('.',',')+') em '+t.date,
-              from:pName,date:today,read:false
-            });
-          });
-          newGoals.forEach(function(g){
-            S.goals.push(g);
-            window._knownPartnerIds.add(g.id);
-            S.notifications.push({id:g.id+'_n',icon:'🎯',
-              msg:pName+' criou meta: '+g.name,from:pName,date:today,read:false});
-          });
-
-          saveLocal();render();
-        }, function(err){
-          console.error('[Casal] Partner listener error:', err.code, err.message);
         });
-
-        window._partnerUnsub=pUnsub;
-
-      }, function(err){
-        console.error('[Casal] Sala listener error:', err.code, err.message);
+        if(window._partnerName)render();
+      },function(e){
+        console.error('[Casal] sala listener error:',e.code);
       });
 
-      window._casalUnsub=salaUnsub;
+      // Switch data listener to shared sala ref
+      var sharedRef=db.collection('salas').doc(code).collection('dados').doc('shared');
+      setupDataListener(sharedRef);
     };
 
     if(S.syncCode)window._startCasalSync();
   });
+
 })();
 </script>
