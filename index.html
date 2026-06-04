@@ -452,8 +452,18 @@ window.addEventListener('popstate',function(e){
 function showExitConfirm(){
   showConfirm('🚪','Sair do app?','Deseja encerrar o GastoCerto?',[
     {label:'Encerrar',style:'background:var(--R);color:#fff;',cb:function(){
-      window.close();
-      setTimeout(function(){history.go(-(history.length));},300);
+      // PWA Android: navigate to blank then close
+      try{
+        navigator.app&&navigator.app.exitApp
+          ? navigator.app.exitApp()
+          : (window.location.href='about:blank');
+      }catch(e){}
+      try{window.close();}catch(e){}
+      // Last resort: minimize via history
+      setTimeout(function(){
+        history.go(-history.length);
+        window.location.replace('about:blank');
+      },200);
     }},
     {label:'Cancelar',style:'background:var(--bg);color:var(--text);',cb:function(){}}
   ]);
@@ -545,7 +555,7 @@ SCR.dashboard=()=>{
   const catMap={};txs.filter(t=>t.type==='despesa').forEach(t=>{catMap[t.category]=(catMap[t.category]||0)+(+t.amount||0);});
   const catArr=Object.entries(catMap).sort((a,b)=>b[1]-a[1]);
   const slices=catArr.slice(0,6).map(([n,v],i)=>({v,c:GCOLS[i%GCOLS.length],n}));
-  const recent=[...S.transactions].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,3);
+  const recent=[...S.transactions].sort((a,b)=>b.date.localeCompare(a.date)||((b.id||'')>(a.id||'')?1:-1)).slice(0,3);
   const photo=S.user.photo;
 
   let tip='Adicione seus lançamentos para ver dicas personalizadas.';
@@ -666,7 +676,7 @@ SCR.notif=()=>{var notifs=[...(S.notifications||[])].reverse();(S.notifications|
 /* ══ LANÇAMENTOS ══ */
 let _txF='todos';
 SCR.lancamentos=()=>{
-  const sorted=[...S.transactions].sort((a,b)=>b.date.localeCompare(a.date));
+  const sorted=[...S.transactions].sort((a,b)=>b.date.localeCompare(a.date)||((b.id||'')>(a.id||'')?1:-1));
   const filtered=sorted.filter(t=>_txF==='todos'||(_txF==='receitas'&&t.type==='receita')||(_txF==='despesas'&&t.type==='despesa'));
   const groups={};filtered.forEach(t=>{groups[t.date]=(groups[t.date]||[]).concat(t);});
   const dates=Object.keys(groups).sort((a,b)=>b.localeCompare(a));
@@ -794,7 +804,7 @@ SCR.menu=()=>{
     </div>
   </div>
   <div class="col gap8 p16" style="padding-bottom:24px">
-    ${[['🏦','Contas','contas'],['🎯','Metas','metas'],['📊','Análise','analise'],['📄','Relatório PDF','relatorio'],['📋','Categorias','categorias'],['👤','Perfil','perfil'],['💑','Modo Casal','casal'],['📥','Importar','importar'],['⚙️','Configurações','config']].map(([ic,lb,sc])=>`
+    ${[['🏦','Contas','contas'],['🎯','Metas','metas'],['📊','Análise','analise'],['📄','Relatório PDF','relatorio'],['📋','Categorias','categorias'],['👤','Perfil','perfil'],['💑','Modo Casal','casal'],['📥','Importar','importar'],['🔔','Alertas','alertas'],['⚙️','Configurações','config']].map(([ic,lb,sc])=>`
     <button onclick="go('${sc}')" class="row gap12" style="padding:14px 16px;background:#fff;border:1px solid var(--border);border-radius:14px;font-size:14px;font-weight:600;color:var(--text);text-align:left;width:100%;box-shadow:var(--sh);cursor:pointer">
       <span style="font-size:22px;width:30px;text-align:center">${ic}</span><span class="f1">${lb}</span><span style="color:var(--muted);font-size:18px">›</span>
     </button>`).join('')}
@@ -1021,7 +1031,9 @@ window.savePerfil=function(){
     window.FB.pushProfile().then(function(){
       // Also update name in sala if in casal mode
       if(S.syncCode&&window.FB.uid){
-        var upd={};upd['nome_'+window.FB.uid]=S.user.name;
+        var upd={};
+        upd['nome_'+window.FB.uid]=S.user.name;
+        if(S.user.phone)upd['phone_'+window.FB.uid]=S.user.phone;
         firebase.firestore().collection('salas').doc(S.syncCode).set(upd,{merge:true}).catch(function(){});
       }
       if(btn){btn.textContent='Salvo!';btn.style.background='#1DB954';btn.disabled=false;}
@@ -1209,6 +1221,229 @@ window.confirmImport=function(){
   S.transactions=S.transactions.concat(newTxs);saveS();window._importedTxs=[];
   alert(newTxs.length+' lancamentos importados!');navTo('lancamentos');
 };
+
+
+/* ════════════════════════════════════════════════════════
+   SISTEMA DE ALERTAS — WhatsApp + Orçamento + Recorrentes
+   ════════════════════════════════════════════════════════ */
+
+// ── WhatsApp helper ──────────────────────────────────────────────────────────
+function sendWhatsApp(phone, msg){
+  // Clean phone: keep only digits, add 55 if needed
+  var p=(phone||'').replace(/\D/g,'');
+  if(!p){return false;}
+  if(p.length<=11&&!p.startsWith('55'))p='55'+p;
+  var url='https://wa.me/'+p+'?text='+encodeURIComponent(msg);
+  window.open(url,'_blank');
+  return true;
+}
+
+function getPhones(){
+  var phones=[];
+  if(S.user&&S.user.phone&&S.user.phone.trim())phones.push({name:S.user.name,phone:S.user.phone});
+  if(window._partnerName&&window._partnerPhone&&window._partnerPhone.trim())
+    phones.push({name:window._partnerName,phone:window._partnerPhone});
+  return phones;
+}
+
+// ── Budget alert: warn when spending reaches 80% of budget ──────────────────
+function checkBudgetAlerts(){
+  var now=new Date();
+  var curMonth=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0');
+  var alerts=[];
+  (S.budgets||[]).filter(function(b){return b.month===curMonth;}).forEach(function(b){
+    var spent=S.transactions.filter(function(t){
+      return t.type==='despesa'&&t.category===b.category&&(t.date||'').startsWith(curMonth);
+    }).reduce(function(s,t){return s+(+t.amount||0);},0);
+    var pct=b.limit>0?(spent/b.limit)*100:0;
+    if(pct>=80&&pct<100)alerts.push({cat:b.category,pct:Math.round(pct),spent:spent,limit:b.limit,status:'alerta'});
+    if(pct>=100)alerts.push({cat:b.category,pct:Math.round(pct),spent:spent,limit:b.limit,status:'estourado'});
+  });
+  return alerts;
+}
+
+// ── Recurrent alert: warn about recurrent expenses due tomorrow ─────────────
+function checkRecurrentAlerts(){
+  var tomorrow=new Date();
+  tomorrow.setDate(tomorrow.getDate()+1);
+  var tDay=String(tomorrow.getDate()).padStart(2,'0');
+  var tMonth=String(tomorrow.getMonth()+1).padStart(2,'0');
+  var alerts=[];
+  (S.transactions||[]).filter(function(t){
+    if(!t.recurrent||t.type!=='despesa')return false;
+    // Check if day of month matches tomorrow
+    var d=(t.date||'').split('-');
+    return d[2]===tDay;
+  }).forEach(function(t){
+    alerts.push({desc:t.desc,amount:t.amount,day:tDay+'/'+tMonth});
+  });
+  return alerts;
+}
+
+// ── Send WhatsApp alert ──────────────────────────────────────────────────────
+window.sendBudgetAlert=function(cat,pct,spent,limit,status){
+  var emoji=status==='estourado'?'🚨':'⚠️';
+  var msg=emoji+' *GastoCerto — Alerta de Orçamento*\n\n'
+    +(status==='estourado'
+      ? '🔴 Orçamento ESTOURADO em *'+cat+'*!\n'
+      : '🟡 Orçamento em *'+cat+'* chegou a *'+pct+'%*!\n')
+    +'💸 Gasto: R$ '+spent.toFixed(2).replace('.',',')+'\n'
+    +'📊 Limite: R$ '+limit.toFixed(2).replace('.',',')+'\n\n'
+    +'Controle seus gastos no GastoCerto 💚';
+  var phones=getPhones();
+  if(!phones.length){alert('Cadastre um telefone no perfil para enviar alertas por WhatsApp.');return;}
+  phones.forEach(function(p){sendWhatsApp(p.phone,msg);});
+};
+
+window.sendRecurrentAlert=function(desc,amount,day){
+  var msg='🔔 *GastoCerto — Lembrete de Vencimento*\n\n'
+    +'📅 A despesa recorrente *'+desc+'* vence *amanhã ('+day+')*!\n'
+    +'💸 Valor: R$ '+(+amount).toFixed(2).replace('.',',')+'\n\n'
+    +'Não esqueça de reservar o valor 💰';
+  var phones=getPhones();
+  if(!phones.length){alert('Cadastre um telefone no perfil para enviar alertas por WhatsApp.');return;}
+  phones.forEach(function(p){sendWhatsApp(p.phone,msg);});
+};
+
+window.sendCasalAlert=function(authorName,txType,txDesc,txAmount){
+  // Alert to partner about new transaction
+  var emoji=txType==='receita'?'💰':'💸';
+  var msg=emoji+' *GastoCerto — Modo Casal*\n\n'
+    +'*'+authorName+'* adicionou uma '+(txType==='receita'?'receita':'despesa')+':\n'
+    +'📝 '+txDesc+'\n'
+    +'💵 R$ '+(+txAmount).toFixed(2).replace('.',',')+'\n\n'
+    +'Veja no GastoCerto 👆';
+  // Send only to partner
+  if(window._partnerPhone){
+    sendWhatsApp(window._partnerPhone, msg);
+  } else {
+    console.log('[WhatsApp] Partner phone not available');
+  }
+};
+
+// ── Run all alert checks ─────────────────────────────────────────────────────
+window.runAlertChecks=function(silent){
+  var budgetAlerts=checkBudgetAlerts();
+  var recAlerts=checkRecurrentAlerts();
+  if(!budgetAlerts.length&&!recAlerts.length){
+    if(!silent)alert('✅ Nenhum alerta no momento. Seus orçamentos estão OK!');
+    return;
+  }
+  // Show alert screen
+  go('alertas');
+};
+
+// ── Alert screen ─────────────────────────────────────────────────────────────
+SCR.alertas=()=>{
+  var bAlerts=checkBudgetAlerts();
+  var rAlerts=checkRecurrentAlerts();
+  var phones=getPhones();
+  var hasPhone=phones.length>0;
+
+  var html='<div class="hdr"><button class="back" onclick="back()">&#8592;</button><h1>Alertas &#128276;</h1></div>'
+    +'<div class="col gap12 p16" style="padding-bottom:24px">';
+
+  if(!hasPhone){
+    html+='<div class="card" style="background:#FFF7ED;border:1px solid #FED7AA">'
+      +'<div style="font-weight:700;font-size:13px;color:#C2410C;margin-bottom:6px">&#128241; Configure seu telefone</div>'
+      +'<div style="font-size:12px;color:var(--text);line-height:1.6">Cadastre seu número no Perfil para receber alertas por WhatsApp.</div>'
+      +'<button onclick="go(\'perfil\')" style="margin-top:10px;padding:8px 16px;background:#F4A261;border-radius:8px;color:#fff;font-weight:600;font-size:12px;border:none;cursor:pointer;font-family:Inter,sans-serif">Ir para o Perfil</button>'
+      +'</div>';
+  }
+
+  if(!bAlerts.length&&!rAlerts.length){
+    html+='<div class="empty"><div class="empty-i">&#9989;</div>'
+      +'<div class="empty-t">Tudo OK!</div>'
+      +'<div class="empty-s">Nenhum alerta de orçamento ou vencimento no momento.</div></div>';
+  }
+
+  if(bAlerts.length){
+    html+='<div style="font-weight:700;font-size:14px;margin-bottom:4px">&#128178; Alertas de Orçamento</div>';
+    bAlerts.forEach(function(a){
+      var clr=a.status==='estourado'?'#E63946':'#F4A261';
+      var bg=a.status==='estourado'?'#FFF0F1':'#FFF7ED';
+      var bdr=a.status==='estourado'?'#FECACA':'#FED7AA';
+      html+='<div class="card" style="border:1.5px solid '+bdr+';background:'+bg+'">'
+        +'<div class="row" style="justify-content:space-between;margin-bottom:6px">'
+        +'<div style="font-weight:700;font-size:14px">'+a.cat+'</div>'
+        +'<div style="font-weight:800;font-size:14px;color:'+clr+'">'+a.pct+'%</div>'
+        +'</div>'
+        +'<div style="background:var(--border);border-radius:99px;height:6px;margin-bottom:8px">'
+        +'<div style="width:'+Math.min(a.pct,100)+'%;height:100%;border-radius:99px;background:'+clr+'"></div></div>'
+        +'<div style="font-size:12px;color:var(--muted)">Gasto: '+fmt(a.spent)+' / Limite: '+fmt(a.limit)+'</div>'
+        +(hasPhone?'<button onclick="window.sendBudgetAlert(\''+a.cat+'\','+a.pct+','+a.spent+','+a.limit+',\''+a.status+'\')" '
+          +'style="margin-top:10px;width:100%;padding:10px;background:#25D366;border-radius:10px;color:#fff;font-weight:700;font-size:13px;border:none;cursor:pointer;font-family:Inter,sans-serif">'
+          +'&#128241; Enviar alerta via WhatsApp</button>':'')
+        +'</div>';
+    });
+  }
+
+  if(rAlerts.length){
+    html+='<div style="font-weight:700;font-size:14px;margin-bottom:4px;margin-top:4px">&#128197; Vencimentos Amanhã</div>';
+    rAlerts.forEach(function(a){
+      html+='<div class="card" style="border:1.5px solid #BFDBFE;background:#EFF6FF">'
+        +'<div class="row" style="justify-content:space-between;margin-bottom:4px">'
+        +'<div style="font-weight:700;font-size:14px">'+a.desc+'</div>'
+        +'<div style="font-weight:800;font-size:14px;color:#E63946">'+fmt(a.amount)+'</div>'
+        +'</div>'
+        +'<div style="font-size:12px;color:var(--muted)">Vence amanhã: '+a.day+'</div>'
+        +(hasPhone?'<button onclick="window.sendRecurrentAlert(\''+a.desc.replace(/'/g,'')+'\','+a.amount+',\''+a.day+'\')" '
+          +'style="margin-top:10px;width:100%;padding:10px;background:#25D366;border-radius:10px;color:#fff;font-weight:700;font-size:13px;border:none;cursor:pointer;font-family:Inter,sans-serif">'
+          +'&#128241; Enviar lembrete via WhatsApp</button>':'')
+        +'</div>';
+    });
+  }
+
+  html+='<div class="card" style="background:#F0FFF4;border:1px solid #86EFAC">'
+    +'<div style="font-weight:700;font-size:13px;color:#16A34A;margin-bottom:8px">&#9881;&#65039; Verificação automática</div>'
+    +'<div style="font-size:12px;color:var(--text);line-height:1.6">'
+    +'O app verifica alertas automaticamente todo dia ao abrir. '
+    +'Você também pode verificar manualmente a qualquer momento.</div>'
+    +'<button onclick="window.runAlertChecks(false)" style="margin-top:10px;width:100%;padding:10px;background:#1DB954;border-radius:10px;color:#fff;font-weight:700;font-size:13px;border:none;cursor:pointer;font-family:Inter,sans-serif">'
+    +'&#128270; Verificar alertas agora</button>'
+    +'</div>'
+    +'</div>';
+
+  return html;
+};
+
+// ── Auto-check on app open (once per day) ────────────────────────────────────
+(function(){
+  var today=new Date().toDateString();
+  var lastCheck=localStorage.getItem('gc_alert_check');
+  if(lastCheck===today)return;
+  localStorage.setItem('gc_alert_check', today);
+  // Check silently after 3s (let app load first)
+  setTimeout(function(){
+    var bAlerts=checkBudgetAlerts();
+    var rAlerts=checkRecurrentAlerts();
+    var total=bAlerts.length+rAlerts.length;
+    if(!total)return;
+    // Add to in-app notifications
+    if(!S.notifications)S.notifications=[];
+    bAlerts.forEach(function(a){
+      var id='budget_'+a.cat+'_'+today;
+      if(S.notifications.find(function(n){return n.id===id;}))return;
+      S.notifications.push({
+        id:id, icon:a.status==='estourado'?'🚨':'⚠️',
+        msg:'Orçamento de '+a.cat+': '+a.pct+'% '+(a.status==='estourado'?'ESTOURADO':'utilizado'),
+        from:'Sistema', date:new Date().toLocaleDateString('pt-BR'), read:false
+      });
+    });
+    rAlerts.forEach(function(a){
+      var id='rec_'+a.desc+'_'+today;
+      if(S.notifications.find(function(n){return n.id===id;}))return;
+      S.notifications.push({
+        id:id, icon:'📅',
+        msg:'Vencimento amanhã: '+a.desc+' ('+fmt(a.amount)+')',
+        from:'Sistema', date:new Date().toLocaleDateString('pt-BR'), read:false
+      });
+    });
+    saveLocal();
+    render(); // update bell badge
+  }, 3000);
+})();
+
 
 SCR.config=()=>`
   <div class="hdr"><button class="back" onclick="back()">←</button><h1>Configurações</h1></div>
@@ -1868,6 +2103,7 @@ render();
       // Write own name to sala
       var nameData={};
       nameData['nome_'+window.FB.uid]=myName();
+      if(S.user&&S.user.phone)nameData['phone_'+window.FB.uid]=S.user.phone;
       db.collection('salas').doc(code).set(nameData,{merge:true}).catch(function(e){
         console.warn('[Casal] write name error:',e.code);
       });
@@ -1879,8 +2115,9 @@ render();
         var d=snap.data();
         var membros=d.membros||[];
         membros.forEach(function(uid){
-          if(uid!==window.FB.uid&&d['nome_'+uid]){
-            window._partnerName=d['nome_'+uid];
+          if(uid!==window.FB.uid){
+            if(d['nome_'+uid]) window._partnerName=d['nome_'+uid];
+            if(d['phone_'+uid]) window._partnerPhone=d['phone_'+uid];
           }
         });
         if(window._partnerName)render();
