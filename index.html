@@ -1723,28 +1723,23 @@ render();
     }).catch(function(e){updateFbUI('error');console.error('[FB] load',e.code);});
 
     ref.onSnapshot(function(snap){
-      if(snap.exists&&!window._fbLock){
-        var data=snap.data();
-        // Smart merge: update own profile/accounts/budgets/goals/cats
-        // but for transactions: only update ones authored by self
-        if(data.user)S.user=data.user;
-        if(data.accounts)S.accounts=data.accounts;
-        if(data.budgets)S.budgets=data.budgets;
-        if(data.goals){
-          // Keep partner goals, update own
-          var partnerGoals=S.goals.filter(function(g){return g._author&&g._author!==S.user.name;});
-          S.goals=(data.goals||[]).concat(partnerGoals);
-        }
-        if(data.cats)S.cats=data.cats;
-        if(data.transactions){
-          // Keep partner txs in memory, replace own txs from Firestore
-          var partnerTxs=S.transactions.filter(function(t){
-            return t._author && t._author!==S.user.name;
-          });
-          S.transactions=(data.transactions||[]).concat(partnerTxs);
-        }
-        saveLocal();render();updateFbUI('idle');
+      if(!snap.exists)return;
+      // Always process own snapshot (don't block with _fbLock)
+      var data=snap.data();
+      var myName=S.user.name;
+      if(data.user)S.user=data.user;
+      if(data.accounts)S.accounts=data.accounts;
+      if(data.budgets)S.budgets=data.budgets;
+      if(data.cats)S.cats=data.cats;
+      if(data.goals){
+        var partnerGoals=S.goals.filter(function(g){return g._author&&g._author!==myName;});
+        S.goals=(data.goals||[]).concat(partnerGoals);
       }
+      if(data.transactions){
+        var partnerTxs=S.transactions.filter(function(t){return t._author&&t._author!==myName;});
+        S.transactions=(data.transactions||[]).concat(partnerTxs);
+      }
+      saveLocal();render();updateFbUI('idle');
     },function(e){updateFbUI('error');});
 
     window._startCasalSync=function(){
@@ -1828,7 +1823,7 @@ render();
           if(!window._syncInitialized){
             window._syncInitialized=true;
             console.log('[Casal] First sync, importing partner data...');
-            window._fbLock=true;
+            // No fbLock needed for first sync
             var myTxIds=new Set((S.transactions||[]).map(function(t){return t.id;}));
             (pData.transactions||[]).forEach(function(t){
               t._author=pName;
@@ -1842,7 +1837,6 @@ render();
             });
             (pData.accounts||[]).forEach(function(a){window._knownPartnerIds.add(a.id);});
             saveLocal();
-            window._fbLock=false;
             render();
             return;
           }
@@ -1854,7 +1848,6 @@ render();
           if(!newTxs.length&&!newGoals.length)return;
 
           console.log('[Casal] New items from partner - txs:', newTxs.length, 'goals:', newGoals.length);
-          window._fbLock=true;
           var today=new Date().toLocaleDateString('pt-BR');
 
           newTxs.forEach(function(t){
@@ -1875,7 +1868,6 @@ render();
           });
 
           saveLocal();render();
-          window._fbLock=false;
         }, function(err){
           console.error('[Casal] Partner listener error:', err.code, err.message);
         });
