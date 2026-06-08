@@ -250,6 +250,15 @@ img{display:block}
 <script>
 'use strict';
 
+// Global error handler - shows errors on screen
+window.onerror=function(msg,src,line,col,err){
+  var sp=document.getElementById('splash');
+  if(sp)sp.classList.add('gone');
+  var body=document.body;
+  if(body)body.innerHTML='<div style="padding:24px;font-family:monospace;font-size:13px;background:#1a0000;color:#ff6b6b;min-height:100vh"><b>ERRO JS:</b><br>'+msg+'<br><br>Linha: '+line+'<br>Col: '+col+'<br><br>'+(err?err.stack||'':'')+'</div>';
+  return true;
+};
+
 /* ══════════════════════════════════════
    IMAGES
 ══════════════════════════════════════ */
@@ -1836,7 +1845,11 @@ window.tagOwn=function(){
 function tagOwn(){window.tagOwn();}
 
 
-render();
+try{render();}catch(e){
+  var sp=document.getElementById('splash');
+  if(sp)sp.classList.add('gone');
+  document.body.innerHTML='<div style="padding:24px;font-family:monospace;font-size:13px;background:#1a0000;color:#ff6b6b;min-height:100vh"><b>ERRO render():</b><br>'+e.message+'<br><br>'+e.stack+'</div>';
+}
 
 /* ══ CLOCK ══ */
 (()=>{
