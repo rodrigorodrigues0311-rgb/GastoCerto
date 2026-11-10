@@ -1,5 +1,5 @@
 /* GastoCerto SW — v4 — atualiza cache automaticamente */
-const CACHE = 'gc-v46';
+const CACHE = 'gc-v49';
 const BASE  = '/GastoCerto/';
 
 self.addEventListener('install', e => {
